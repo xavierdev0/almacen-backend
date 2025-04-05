@@ -1,0 +1,35 @@
+# Entorno virtual
+venv/
+
+# Bytecode de Python y archivos temporales
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Variables de entorno
+.env
+
+# Configuración del IDE (VS Code)
+.vscode/
+
+
+*.db
+
+# Archivos de log
+*.log
+
+# Otros archivos específicos del sistema operativo
+*.swp # Archivos de swap de Vim
+*.swo # Archivos de swap de Vim
+.DS_Store # Archivos de macOS
+
+# Configuraciones de PyCharm
+.idea/
+
+# Archivos de cobertura de tests
+.coverage
+htmlcov/
+
+# Archivos generados por herramientas de documentación
+docs/_build/
