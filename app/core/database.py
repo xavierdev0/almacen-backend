@@ -58,22 +58,3 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-# ---------------------------------------------------------------------------
-# Opcional: Función para crear tablas (¡Cuidado si usas Alembic!)
-# ---------------------------------------------------------------------------
-# Generalmente, Alembic maneja la creación y actualización de tablas.
-# Esta función es más útil para pruebas rápidas o configuraciones iniciales MUY simples.
-# NO la llames desde tu aplicación principal si estás usando migraciones de Alembic.
-def create_db_and_tables():
-     """
-     Crea todas las tablas definidas en los metadatos de SQLModel.
-     ADVERTENCIA: Usar con precaución si se gestionan migraciones con Alembic.
-     """
-     # Asegúrate de que todos tus modelos SQLModel sean importados ANTES de llamar a create_all
-     # Ejemplo: from app.models.usuario_model import Usuario
-     #          from app.models.rol_model import Rol
-     #          ...etc para todos los modelos...
-     print("Intentando crear tablas (si no existen)...")
-     SQLModel.metadata.create_all(engine)
-     print("Tablas verificadas/creadas.")
-# ---------------------------------------------------------------------------

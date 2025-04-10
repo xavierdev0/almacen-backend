@@ -19,5 +19,5 @@ class Permiso(SQLModel, table=True):
     nombre: str = Field(max_length=100, sa_column=Column(String(100), nullable=False, index=True, comment='Ej: proforma:crear, inventario:leer'))
     descripcion: Optional[str] = Field(default=None, sa_column=Column(Text))
 
-    # Relaciones
-    roles: List["Rol"] = Relationship(back_populates="permisos", link_model=RolPermisoLink) # Usa string
+    # Relaciones - volvemos a usar List[...] directamente
+    roles: List["Rol"] = Relationship(back_populates="permisos", link_model=RolPermisoLink)

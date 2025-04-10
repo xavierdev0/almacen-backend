@@ -47,7 +47,7 @@ class Usuario(SQLModel, table=True):
         default=None, sa_column=Column(TIMESTAMP(timezone=False), server_default=func.now(), onupdate=func.now(), nullable=False)
     )
 
-    # Relaciones
+    # Relaciones - volvemos a usar List[...] directamente que es compatible con SQLModel 0.0.14
     roles: List["Rol"] = Relationship(back_populates="usuarios", link_model=UsuarioRolLink)
     proformas_creadas: List["Proforma"] = Relationship(back_populates="creador")
     asignaciones_ordenes: List["AsignacionOrdenProduccion"] = Relationship(back_populates="usuario")

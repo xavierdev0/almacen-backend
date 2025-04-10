@@ -31,7 +31,7 @@ class Rol(SQLModel, table=True):
     nombre: str = Field(max_length=100, sa_column=Column(String(100), nullable=False, index=True, comment='Ej: Administrador, Vendedor, Supervisor'))
     descripcion: Optional[str] = Field(default=None, sa_column=Column(Text))
 
-    # Relaciones
-    usuarios: List["Usuario"] = Relationship(back_populates="roles", link_model=UsuarioRolLink)# Usa string para evitar importación circular directa
+    # Relaciones - volvemos a usar List[...] directamente
+    usuarios: List["Usuario"] = Relationship(back_populates="roles", link_model=UsuarioRolLink)
     permisos: List["Permiso"] = Relationship(back_populates="roles", link_model=RolPermisoLink)
     
