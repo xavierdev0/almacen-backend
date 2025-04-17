@@ -1,45 +1,108 @@
 # app/models/__init__.py
+# app/models/__init__.py
+"""
+Este archivo __init__.py convierte al directorio 'models' en un paquete de Python
+y re-exporta todas las clases de modelos SQLModel definidas en los módulos
+separados.
 
-# Importa Enums
-from .enums import (
-    TipoProductoServicioEnum,
-    EstadoProformaEnum,
-    TipoItemProformaEnum,
-    EstadoOrdenProduccionEnum,
-    TipoMaquinaEnum,
-    EstadoMaquinaEnum,
-    TipoMantenimientoEnum
+Esto permite importar los modelos de forma más conveniente desde otras partes
+de la aplicación, por ejemplo:
+  from app.models import Usuario, PedidoCliente
+en lugar de:
+  from app.models.user_models import Usuario
+  from app.models.order_models import PedidoCliente
+"""
+
+# Importaciones desde user_models.py
+from .user_models import (
+    UsuarioRol,
+    RolPermiso,
+    Usuario,
+    Rol,
+    Permiso,
+    PeriodoIndisponibilidad
 )
 
-# Importa Modelos y Link Models (si se definieron en el mismo archivo del modelo principal)
-from .usuario_model import Usuario, UsuarioRolLink
-from .rol_model import Rol, RolPermisoLink
-from .permiso_model import Permiso
-from .cliente_model import Cliente
-from .tipo_material_model import TipoMaterial
-from .item_inventario_model import ItemInventario
-from .definicion_producto_servicio_model import DefinicionProductoServicio
-from .proforma_model import Proforma, LineaProforma
-from .orden_produccion_model import OrdenProduccion
-from .asignacion_orden_produccion_model import AsignacionOrdenProduccion
-from .maquina_model import Maquina
-from .registro_mantenimiento_model import RegistroMantenimiento
-from .reporte_error_maquina_model import ReporteErrorMaquina
-from .periodo_indisponibilidad_model import PeriodoIndisponibilidad
-from .venta_factura_model import VentaFactura
+# Importaciones desde inventory_models.py
+from .inventory_models import (
+    MaterialDimensional,
+    StockItemDimensional,
+    MaterialConsumible,
+    MaterialSimple
+)
 
-# Opcional: Lista __all__ para controlar 'from app.models import *'
+# Importaciones desde machine_models.py
+from .machine_models import (
+    MaquinaHerramienta,
+    UsuarioAreaTrabajo,
+    AreaTrabajo,
+    Maquina,
+    Herramienta,
+    RegistroMantenimiento,
+    ReporteErrorMaquina
+)
+
+# Importaciones desde service_models.py
+from .service_models import (
+    ServicioDefinicion,
+    Formula,
+    FormulaItem
+)
+
+# Importaciones desde order_models.py
+from .order_models import (
+    PedidoCliente,
+    Proforma,
+    LineaProformaMaterial,
+    LineaProformaServicio,
+    OrdenProduccion,
+    AsignacionTareaOrden
+)
+
+# Importaciones desde client_model.py
+from .client_model import Cliente
+
+# Importaciones desde billing_models.py
+from .billing_models import VentaFactura
+
+
+# Opcional: Definir __all__ para controlar qué se importa con 'from app.models import *'
+# Es buena práctica definirlo explícitamente si se planea usar 'import *'
+# aunque la importación explícita (from app.models import MiModelo) es generalmente preferida.
 __all__ = [
-     "Usuario", "UsuarioRolLink", "Rol", "RolPermisoLink", "Permiso", "Cliente",
-     "TipoMaterial", "ItemInventario", "DefinicionProductoServicio", "Proforma",
-     "LineaProforma", "OrdenProduccion", "AsignacionOrdenProduccion", "Maquina",
-     "RegistroMantenimiento", "ReporteErrorMaquina", "PeriodoIndisponibilidad",
-     "VentaFactura",
-    # Enums
-     "TipoProductoServicioEnum", "EstadoProformaEnum", "TipoItemProformaEnum",
-     "EstadoOrdenProduccionEnum", "TipoMaquinaEnum", "EstadoMaquinaEnum",
-     "TipoMantenimientoEnum"
- ]
-
-
-print("Modelos SQLModel (versión refinada) cargados") # Opcional
+    # User Models
+    "UsuarioRol",
+    "RolPermiso",
+    "Usuario",
+    "Rol",
+    "Permiso",
+    "PeriodoIndisponibilidad",
+    # Inventory Models
+    "MaterialDimensional",
+    "StockItemDimensional",
+    "MaterialConsumible",
+    "MaterialSimple",
+    # Machine Models
+    "MaquinaHerramienta",
+    "UsuarioAreaTrabajo",
+    "AreaTrabajo",
+    "Maquina",
+    "Herramienta",
+    "RegistroMantenimiento",
+    "ReporteErrorMaquina",
+    # Service Models
+    "ServicioDefinicion",
+    "Formula",
+    "FormulaItem",
+    # Order Models
+    "PedidoCliente",
+    "Proforma",
+    "LineaProformaMaterial",
+    "LineaProformaServicio",
+    "OrdenProduccion",
+    "AsignacionTareaOrden",
+    # Client Models
+    "Cliente",
+    # Billing Models
+    "VentaFactura",
+]
