@@ -8,7 +8,7 @@ from uuid import UUID
 
 from app.core.database import get_db
 from app.core.security import oauth2_scheme, decode_access_token
-from app.models.usuario_model import Usuario
+from app.models.user_models import Usuario
 from app.repositories import usuario_repository
 
 logger = logging.getLogger(__name__)
@@ -36,15 +36,15 @@ async def get_current_user(
         HTTPException 401: Para cualquier fallo de autenticación
     """
     try:
-        # Decodificar y validar token
-        token_payload = decode_access_token(token)
-        if not token_payload or "sub" not in token_payload:
-            logger.warning(f"Token inválido recibido: {token[:10]}... (IP: {request.client.host})")
-            raise auth_exception()
+
+        subject_str = decode_access_token(token) 
+
+        if not subject_str:
+            logger.warning(f"Token inválido o claims incompletos: {token[:10]}... (IP: {request.client.host})")
+            # Puedes usar un mensaje más específico si quieres diferenciar de otros errores 401
+            raise auth_exception("Token inválido o expirado")
             
-        subject_str = token_payload["sub"]
         try:
-            # Intentar convertir el 'sub' (que debe ser el ID como string) a entero
             user_id = int(subject_str)
         except ValueError:
             # Si no se puede convertir a entero, el token es inválido para nuestro sistema

@@ -6,7 +6,7 @@ from typing import Optional, Union
 from uuid import UUID
 import re
 
-from app.models.usuario_model import Usuario
+from app.models.user_models import Usuario
 from app.schemas.usuario_schema import UsuarioCreate, UsuarioUpdate, UsuarioUpdatePassword
 from app.repositories import usuario_repository
 from app.core.security import get_password_hash, verify_password
@@ -49,22 +49,22 @@ def create_new_user(db: Session, user_in: UsuarioCreate) -> Usuario:
             raise HTTPException(status_code=400, detail="Username no disponible")
 
         # Validar fortaleza de contraseña
-        if settings.ENFORCE_PASSWORD_POLICY:
-            if len(user_in.password) < 12:
-                raise HTTPException(
-                    status_code=400,
-                    detail="La contraseña debe tener al menos 12 caracteres"
-                )
+        #if settings.ENFORCE_PASSWORD_POLICY:
+        #    if len(user_in.password) < 12:
+        #        raise HTTPException(
+        #            status_code=400,
+        #            detail="La contraseña debe tener al menos 12 caracteres"
+        #        )
 
         # Crear usuario
         hashed_password = get_password_hash(user_in.password)
-        user_data = user_in.model_dump(exclude={"password"})
+        user_data_dict = user_in.model_dump(exclude={"password", "email", "username"})
         db_user = Usuario(
-            **user_data,
-            email=email,
-            username=username,
+            email=email,                          # Pasar email sanitizado
+            username=username,                    # Pasar username sanitizado
             contrasena_hash=hashed_password,
-            esta_activo=True
+            esta_activo=True,
+            **user_data_dict                      # Pasar el *resto* de los datos (ej: nombre_completo)
         )
 
         created_user = usuario_repository.create_usuario(db, db_user)
@@ -132,9 +132,9 @@ def update_user_password(
             raise HTTPException(400, "Contraseña actual incorrecta")
 
         # Validar nueva contraseña
-        if settings.ENFORCE_PASSWORD_POLICY:
-            if len(password_in.new_password) < 12:
-                raise HTTPException(400, "La contraseña debe tener al menos 12 caracteres")
+        #if settings.ENFORCE_PASSWORD_POLICY:
+        #    if len(password_in.new_password) < 12:
+        #        raise HTTPException(400, "La contraseña debe tener al menos 12 caracteres")
 
         # Actualizar
         new_hash = get_password_hash(password_in.new_password)
@@ -151,7 +151,7 @@ def update_user_password(
         raise HTTPException(500, "Error interno al actualizar contraseña")
 
 # --- Lectura ---
-def get_user_info(db: Session, user_id: Union[int, UUID]) -> Usuario:
+def get_user_info(db: Session, user_id: Optional[int]) -> Usuario:
     """Obtiene usuario por ID/UUID."""
     try:
         user = usuario_repository.get_usuario(db, user_id)

@@ -102,8 +102,16 @@ class Proforma(SQLModel, table=True):
     lineas_servicio: List["LineaProformaServicio"] = Relationship(back_populates="proforma")
 
     # Relación con VentaFactura (lado N de la relación N:M implícita)
-    facturas_productos: List["VentaFactura"] = Relationship(back_populates="proforma_productos")
-    facturas_servicios: List["VentaFactura"] = Relationship(back_populates="proforma_servicios")
+    facturas_productos: List["VentaFactura"] = Relationship(
+        back_populates="proforma_productos",
+        # Añadir esta línea especificando la FK en la tabla VentaFactura
+        sa_relationship_kwargs={'foreign_keys': '[VentaFactura.proforma_productos_id]'}
+    )
+    facturas_servicios: List["VentaFactura"] = Relationship(
+        back_populates="proforma_servicios",
+        # Añadir esta línea especificando la FK en la tabla VentaFactura
+        sa_relationship_kwargs={'foreign_keys': '[VentaFactura.proforma_servicios_id]'}
+    )
 
 
 # -----------------------------------------------------

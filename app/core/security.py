@@ -51,6 +51,7 @@ def create_access_token(subject: str | Any, expires_delta: Optional[timedelta] =
         # Puedes añadir más claims aquí (ej: roles, iss, aud)
     }
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    
     return encoded_jwt
 
 def decode_access_token(token: str) -> Optional[str]:

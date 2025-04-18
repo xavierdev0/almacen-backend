@@ -4,7 +4,7 @@ from typing import Optional, Sequence, Union, Dict, Any
 import logging
 from uuid import UUID
 
-from app.models.usuario_model import Usuario
+from app.models.user_models import Usuario
 from app.schemas.usuario_schema import UsuarioUpdate
 
 logger = logging.getLogger(__name__)

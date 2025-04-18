@@ -14,7 +14,7 @@ from app.schemas.usuario_schema import (
     UsuarioUpdatePassword
 )
 from app.api.deps import get_current_active_user
-from app.models.usuario_model import Usuario
+from app.models.user_models import Usuario
 
 router = APIRouter(tags=["users"])
 logger = logging.getLogger(__name__)
@@ -65,7 +65,11 @@ def update_self(
     """Permite actualizar información del perfil."""
     try:
         logger.info(f"Actualizando usuario ID: {current_user.id}")
-        return usuario_service.update_user_profile(db, current_user, update_data)
+        return usuario_service.update_user_profile(
+                                                    db=db,
+                                                    current_user=current_user,
+                                                    user_in=update_data # Match the parameter name 'user_in' in the service function definition
+                                                )
     except Exception as e:
         logger.error(f"Error actualizando perfil: {str(e)}")
         raise HTTPException(500, "Error interno al actualizar")
@@ -84,7 +88,7 @@ def update_password(
     """Endpoint para cambio de contraseña."""
     try:
         logger.info(f"Cambiando contraseña usuario ID: {current_user.id}")
-        usuario_service.update_user_password(db, current_user, password_data)
+        usuario_service.update_user_password(db=db, current_user=current_user, password_in=password_data)
     except Exception as e:
         logger.error(f"Error cambiando contraseña: {str(e)}")
         raise HTTPException(500, "Error interno al actualizar contraseña")

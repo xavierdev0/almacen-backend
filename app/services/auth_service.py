@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import HTTPException, status
 import logging
 
-from app.models.usuario_model import Usuario
+from app.models.user_models import Usuario
 from app.repositories import usuario_repository
 from app.core.security import verify_password
 

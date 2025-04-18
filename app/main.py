@@ -8,6 +8,8 @@ from app.core.database import engine
 from sqlmodel import SQLModel
 import logging
 
+from app.api.v1.api import api_router_v1 # Importa el router de la v1
+from app.core.config import settings    # Importa la configuración
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -23,3 +25,4 @@ app = FastAPI(
 
 
 
+app.include_router(api_router_v1, prefix=settings.API_V1_STR)
