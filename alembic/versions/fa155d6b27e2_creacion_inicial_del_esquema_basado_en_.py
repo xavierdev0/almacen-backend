@@ -196,7 +196,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_periodo_indisponibilidad_usuario_id'), 'periodo_indisponibilidad', ['usuario_id'], unique=False)
-    op.create_table('rolpermiso',
+    op.create_table('rol_permiso',
     sa.Column('rol_id', sa.Integer(), nullable=False),
     sa.Column('permiso_id', sa.Integer(), nullable=False),
     sa.ForeignKeyConstraint(['permiso_id'], ['permiso.id'], ),
@@ -210,7 +210,7 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['usuario_id'], ['usuario.id'], ),
     sa.PrimaryKeyConstraint('usuario_id', 'area_trabajo_id')
     )
-    op.create_table('usuariorol',
+    op.create_table('usuario_rol',
     sa.Column('usuario_id', sa.Integer(), nullable=False),
     sa.Column('rol_id', sa.Integer(), nullable=False),
     sa.ForeignKeyConstraint(['rol_id'], ['rol.id'], ),
@@ -489,9 +489,9 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_formula_item_material_consumible_id'), table_name='formula_item')
     op.drop_index(op.f('ix_formula_item_formula_id'), table_name='formula_item')
     op.drop_table('formula_item')
-    op.drop_table('usuariorol')
+    op.drop_table('usuario_rol')
     op.drop_table('usuario_area_trabajo')
-    op.drop_table('rolpermiso')
+    op.drop_table('rol_permiso')
     op.drop_index(op.f('ix_periodo_indisponibilidad_usuario_id'), table_name='periodo_indisponibilidad')
     op.drop_table('periodo_indisponibilidad')
     op.drop_index(op.f('ix_pedido_cliente_usuario_id_vendedor'), table_name='pedido_cliente')

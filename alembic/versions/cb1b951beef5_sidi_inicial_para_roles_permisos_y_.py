@@ -9,8 +9,12 @@ from typing import Sequence, Union, Dict, List, Tuple, Set
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.sql import table, column
-from sqlalchemy import String, Integer, Text, Boolean, select, tuple_
+from sqlalchemy.sql import table, column,  select
+from sqlalchemy import String, Integer, Text, Boolean, tuple_
+
+# Importar datos iniciales desde el archivo centralizado
+from app.initial_data import initial_roles, initial_permissions
+
 
 # revision identifiers, used by Alembic.
 revision: str = 'cb1b951beef5'
@@ -47,92 +51,6 @@ rol_permiso_table = sa.Table(
 
 # --- Datos Iniciales (Basados en nuestra definición) ---
 
-# 1. Roles
-initial_roles = [
-    {'nombre': 'Administrador', 'descripcion': 'Acceso total al sistema.'},
-    {'nombre': 'Vendedor', 'descripcion': 'Gestión de ventas y clientes.'},
-    {'nombre': 'Supervisor', 'descripcion': 'Supervisión de producción y operarios.'},
-    {'nombre': 'Dibujante', 'descripcion': 'Cotización y preparación de trabajos CNC.'},
-    {'nombre': 'Operario', 'descripcion': 'Ejecución de tareas de producción.'},
-]
-
-# 2. Permisos (Lista refinada)
-initial_permissions = [
-    # Gestión Acceso y Sistema
-    {'nombre_accion': 'gestionar', 'nombre_recurso': 'usuario', 'descripcion': 'CRUD completo de usuarios (implica leer, crear, actualizar, eliminar).'},
-    {'nombre_accion': 'gestionar', 'nombre_recurso': 'rol', 'descripcion': 'CRUD completo de roles (implica leer, crear, actualizar, eliminar).'},
-    {'nombre_accion': 'leer', 'nombre_recurso': 'usuario', 'descripcion': 'Ver información de usuarios.'},
-    {'nombre_accion': 'crear', 'nombre_recurso': 'usuario', 'descripcion': 'Registrar nuevos usuarios.'},
-    {'nombre_accion': 'actualizar', 'nombre_recurso': 'usuario', 'descripcion': 'Modificar cualquier usuario.'},
-    {'nombre_accion': 'eliminar', 'nombre_recurso': 'usuario', 'descripcion': 'Eliminar usuarios.'},
-    {'nombre_accion': 'leer', 'nombre_recurso': 'rol', 'descripcion': 'Ver roles definidos.'},
-    {'nombre_accion': 'crear', 'nombre_recurso': 'rol', 'descripcion': 'Crear nuevos roles.'},
-    {'nombre_accion': 'actualizar', 'nombre_recurso': 'rol', 'descripcion': 'Modificar roles existentes.'},
-    {'nombre_accion': 'eliminar', 'nombre_recurso': 'rol', 'descripcion': 'Eliminar roles.'},
-    {'nombre_accion': 'leer', 'nombre_recurso': 'permiso', 'descripcion': 'Ver permisos definidos.'},
-    {'nombre_accion': 'gestionar', 'nombre_recurso': 'permiso', 'descripcion': 'CRUD completo sobre permisos.'},
-    {'nombre_accion': 'asignar', 'nombre_recurso': 'rol_usuario', 'descripcion': 'Conceder rol a usuario.'},
-    {'nombre_accion': 'remover', 'nombre_recurso': 'rol_usuario', 'descripcion': 'Quitar rol a usuario.'},
-    {'nombre_accion': 'asignar', 'nombre_recurso': 'permiso_rol', 'descripcion': 'Conceder permiso a rol.'},
-    {'nombre_accion': 'remover', 'nombre_recurso': 'permiso_rol', 'descripcion': 'Quitar permiso a rol.'},
-    {'nombre_accion': 'anular', 'nombre_recurso': 'venta_factura', 'descripcion': 'Anular una venta/factura completa.'},
-    {'nombre_accion': 'ver', 'nombre_recurso': 'panel_admin', 'descripcion': 'Acceso a interfaz de administración.'},
-    # Clientes
-    {'nombre_accion': 'leer', 'nombre_recurso': 'cliente', 'descripcion': 'Ver clientes existentes.'},
-    {'nombre_accion': 'crear', 'nombre_recurso': 'cliente', 'descripcion': 'Registrar nuevos clientes.'},
-    {'nombre_accion': 'actualizar', 'nombre_recurso': 'cliente', 'descripcion': 'Modificar datos de clientes.'},
-    {'nombre_accion': 'eliminar', 'nombre_recurso': 'cliente', 'descripcion': 'Eliminar clientes.'},
-    # Proformas
-    {'nombre_accion': 'leer', 'nombre_recurso': 'proforma', 'descripcion': 'Ver detalles de proformas.'},
-    {'nombre_accion': 'crear', 'nombre_recurso': 'proforma', 'descripcion': 'Iniciar una nueva proforma.'},
-    {'nombre_accion': 'actualizar', 'nombre_recurso': 'proforma_propia', 'descripcion': 'Modificar proforma propia (borrador).'},
-    {'nombre_accion': 'actualizar', 'nombre_recurso': 'proforma_asignada', 'descripcion': 'Modificar proforma asignada (Dibujante).'},
-    {'nombre_accion': 'actualizar', 'nombre_recurso': 'proforma_global', 'descripcion': 'Modificar cualquier proforma (Admin).'},
-    {'nombre_accion': 'cancelar', 'nombre_recurso': 'proforma', 'descripcion': 'Cancelar una proforma.'},
-    {'nombre_accion': 'enviar', 'nombre_recurso': 'proforma', 'descripcion': 'Marcar proforma como lista.'},
-    {'nombre_accion': 'posponer', 'nombre_recurso': 'proforma', 'descripcion': 'Guardar proforma para después.'},
-    {'nombre_accion': 'adjuntar', 'nombre_recurso': 'archivo_proforma', 'descripcion': 'Subir archivos a proforma (ej: CNC).'},
-    # Pedidos y Órdenes
-    {'nombre_accion': 'leer', 'nombre_recurso': 'pedido_cliente', 'descripcion': 'Ver estado general del pedido.'},
-    {'nombre_accion': 'leer', 'nombre_recurso': 'orden_produccion', 'descripcion': 'Ver detalles de orden de producción.'},
-    {'nombre_accion': 'tomar', 'nombre_recurso': 'tarea_orden', 'descripcion': 'Asignarse/Tomar tarea de una orden.'},
-    {'nombre_accion': 'actualizar', 'nombre_recurso': 'tarea_orden', 'descripcion': 'Registrar avance/completar tarea.'},
-    {'nombre_accion': 'gestionar', 'nombre_recurso': 'orden_produccion', 'descripcion': 'Gestionar estado/supervisor de orden.'},
-    {'nombre_accion': 'adjuntar', 'nombre_recurso': 'archivo_orden', 'descripcion': 'Subir archivo/foto resultado final.'},
-    # Inventario
-    {'nombre_accion': 'leer', 'nombre_recurso': 'material_definicion', 'descripcion': 'Ver tipos de materiales.'},
-    {'nombre_accion': 'gestionar', 'nombre_recurso': 'material_definicion', 'descripcion': 'CRUD sobre tipos de material.'},
-    {'nombre_accion': 'leer', 'nombre_recurso': 'stock', 'descripcion': 'Ver niveles y detalles de stock.'},
-    {'nombre_accion': 'ajustar', 'nombre_recurso': 'stock', 'descripcion': 'Realizar ajustes manuales de stock.'},
-    {'nombre_accion': 'ver', 'nombre_recurso': 'merma', 'descripcion': 'Consultar stock marcado como merma.'},
-    # Infraestructura
-    {'nombre_accion': 'leer', 'nombre_recurso': 'area_trabajo', 'descripcion': 'Ver áreas de trabajo.'},
-    {'nombre_accion': 'gestionar', 'nombre_recurso': 'area_trabajo', 'descripcion': 'CRUD sobre áreas de trabajo.'},
-    {'nombre_accion': 'asignar', 'nombre_recurso': 'usuario_area', 'descripcion': 'Vincular usuario a área.'},
-    {'nombre_accion': 'remover', 'nombre_recurso': 'usuario_area', 'descripcion': 'Desvincular usuario de área.'},
-    {'nombre_accion': 'leer', 'nombre_recurso': 'maquina', 'descripcion': 'Ver información de máquinas.'},
-    {'nombre_accion': 'gestionar', 'nombre_recurso': 'maquina', 'descripcion': 'CRUD sobre máquinas.'},
-    {'nombre_accion': 'leer', 'nombre_recurso': 'herramienta', 'descripcion': 'Ver información de herramientas.'},
-    {'nombre_accion': 'gestionar', 'nombre_recurso': 'herramienta', 'descripcion': 'CRUD sobre herramientas.'},
-    {'nombre_accion': 'asignar', 'nombre_recurso': 'maquina_herramienta', 'descripcion': 'Vincular herramienta a máquina.'},
-    {'nombre_accion': 'remover', 'nombre_recurso': 'maquina_herramienta', 'descripcion': 'Desvincular herramienta de máquina.'},
-    {'nombre_accion': 'leer', 'nombre_recurso': 'registro_mantenimiento', 'descripcion': 'Ver historial de mantenimiento.'},
-    {'nombre_accion': 'crear', 'nombre_recurso': 'registro_mantenimiento', 'descripcion': 'Registrar mantenimiento.'},
-    {'nombre_accion': 'leer', 'nombre_recurso': 'reporte_error_maquina', 'descripcion': 'Ver errores reportados.'},
-    {'nombre_accion': 'crear', 'nombre_recurso': 'reporte_error_maquina', 'descripcion': 'Reportar nuevo error/avería.'},
-    {'nombre_accion': 'resolver', 'nombre_recurso': 'reporte_error_maquina', 'descripcion': 'Marcar error como resuelto.'},
-    # Servicios y Fórmulas
-    {'nombre_accion': 'leer', 'nombre_recurso': 'servicio_definicion', 'descripcion': 'Ver los servicios ofrecidos.'},
-    {'nombre_accion': 'gestionar', 'nombre_recurso': 'servicio_definicion', 'descripcion': 'CRUD sobre definiciones de servicios.'},
-    {'nombre_accion': 'leer', 'nombre_recurso': 'formula', 'descripcion': 'Ver fórmulas asociadas a servicios.'},
-    {'nombre_accion': 'gestionar', 'nombre_recurso': 'formula', 'descripcion': 'CRUD sobre fórmulas.'},
-    # Facturación y Pagos
-    {'nombre_accion': 'leer', 'nombre_recurso': 'venta_factura', 'descripcion': 'Ver información de facturas.'},
-    {'nombre_accion': 'actualizar', 'nombre_recurso': 'estado_pago', 'descripcion': 'Marcar factura como pagada.'},
-    # Acciones Personales
-    {'nombre_accion': 'leer', 'nombre_recurso': 'periodo_indisponibilidad', 'descripcion': 'Ver reportes de indisponibilidad.'},
-    {'nombre_accion': 'registrar', 'nombre_recurso': 'mi_indisponibilidad', 'descripcion': 'Registrar periodo de indisponibilidad propio.'},
-]
 
 # 3. Mapeo Rol -> Lista de Permisos (accion:recurso)
 role_permission_mapping: Dict[str, List[str]] = {
@@ -220,132 +138,98 @@ def upgrade() -> None:
     session = sa.orm.Session(bind=bind)
 
     try:
-        # --- 1. Insertar Roles (si no existen) ---
-        print("Verificando y poblando roles iniciales...")
+        # --- Insertar Roles y Permisos (SE MANTIENE) ---
+        print("(Migration) Verificando y poblando roles iniciales...")
         existing_roles_names = _get_existing_data(session, rol_table, ['nombre'])
-        roles_to_insert = [
-            role for role in initial_roles
-            if role['nombre'] not in existing_roles_names
-        ]
+        roles_to_insert = [r for r in initial_roles if r['nombre'] not in existing_roles_names]
         if roles_to_insert:
             op.bulk_insert(rol_table, roles_to_insert)
-            print(f"Se insertaron {len(roles_to_insert)} nuevos roles.")
-            # Forzar flush para asegurar que los datos se envíen a la DB antes de consultar IDs
-            session.flush()
+            print(f"(Migration) Se insertaron {len(roles_to_insert)} nuevos roles.")
         else:
-            print("Todos los roles iniciales ya existen.")
+            print("(Migration) Todos los roles iniciales ya existen.")
 
-        # --- 2. Insertar Permisos (si no existen) ---
-        print("Verificando y poblando permisos iniciales...")
+        print("(Migration) Verificando y poblando permisos iniciales...")
         existing_perms_keys = _get_existing_data(session, permiso_table, ['nombre_accion', 'nombre_recurso'])
-        permissions_to_insert = [
-            perm for perm in initial_permissions
-            if (perm['nombre_accion'], perm['nombre_recurso']) not in existing_perms_keys
-        ]
+        permissions_to_insert = [p for p in initial_permissions if (p['nombre_accion'], p['nombre_recurso']) not in existing_perms_keys]
         if permissions_to_insert:
             op.bulk_insert(permiso_table, permissions_to_insert)
-            print(f"Se insertaron {len(permissions_to_insert)} nuevos permisos.")
-            # Forzar flush
-            session.flush()
+            print(f"(Migration) Se insertaron {len(permissions_to_insert)} nuevos permisos.")
         else:
-            print("Todos los permisos iniciales ya existen.")
+            print("(Migration) Todos los permisos iniciales ya existen.")
 
-        # --- 3. Obtener IDs y Mapear (Incluye existentes y nuevos) ---
-        print("Obteniendo IDs actualizados para roles y permisos...")
-        role_id_map = _get_id_map(session, rol_table, ['nombre'])
-        # --- DEBUGGING ROLES ---
-        print(f"  DEBUG: Mapeo Rol->ID obtenido: {role_id_map}")
-        if len(role_id_map) < len(initial_roles):
-            print(f"  WARNING: No se pudieron obtener todos los IDs de Roles. Esperados: {len(initial_roles)}, Obtenidos: {len(role_id_map)}")
-        # --- FIN DEBUGGING ---
+        session.commit() # Commit después de insertar roles/permisos base
 
-        permission_id_map = _get_id_map(session, permiso_table, ['nombre_accion', 'nombre_recurso'])
-        # --- DEBUGGING PERMISSIONS ---
-        print(f"  DEBUG: Mapeo Permiso(accion, recurso)->ID obtenido (Tuplas): {permission_id_map}") # Mostrar mapa original
-        if len(permission_id_map) < len(initial_permissions):
-            print(f"  WARNING: No se pudieron obtener todos los IDs de Permisos. Esperados: {len(initial_permissions)}, Obtenidos: {len(permission_id_map)}")
-        # Revisar explícitamente si las tuplas clave existen en el mapa obtenido
-        if ('gestionar', 'usuario') not in permission_id_map:
-            print("  DEBUG: La tupla ('gestionar', 'usuario') NO FUE ENCONTRADA en permission_id_map.")
-        else:
-             print(f"  DEBUG: La tupla ('gestionar', 'usuario') SÍ FUE ENCONTRADA. ID: {permission_id_map.get(('gestionar', 'usuario'))}")
-        if ('gestionar', 'rol') not in permission_id_map:
-            print("  DEBUG: La tupla ('gestionar', 'rol') NO FUE ENCONTRADA en permission_id_map.")
-        else:
-             print(f"  DEBUG: La tupla ('gestionar', 'rol') SÍ FUE ENCONTRADA. ID: {permission_id_map.get(('gestionar', 'rol'))}")
-        # --- FIN DEBUGGING ---
-
-        # Crear clave 'accion:recurso' para mapeo fácil
-        permission_key_to_id_map = {
-            f"{action}:{resource}": perm_id
-            for (action, resource), perm_id in permission_id_map.items()
-        }
-        # --- DEBUGGING PERMISSIONS STR KEY ---
-        print(f"  DEBUG: Mapeo Permiso str(accion:recurso)->ID creado: {permission_key_to_id_map}")
-        if 'gestionar:usuario' not in permission_key_to_id_map:
-             print("  DEBUG: La clave 'gestionar:usuario' NO ESTÁ en permission_key_to_id_map.")
-        if 'gestionar:rol' not in permission_key_to_id_map:
-             print("  DEBUG: La clave 'gestionar:rol' NO ESTÁ en permission_key_to_id_map.")
-        # --- FIN DEBUGGING ---
-
-        # --- 4. Crear y Insertar Asociaciones RolPermiso (si no existen) ---
-        print("Verificando y creando asociaciones rol-permiso...")
-        # (El resto de la lógica de asociación sigue igual que antes)
-        existing_links_query = select(rol_permiso_table.c.rol_id, rol_permiso_table.c.permiso_id)
-        existing_links_results = session.execute(existing_links_query).fetchall()
-        existing_links_set = set(existing_links_results)
-
-        rol_permiso_entries_to_insert = []
-        missing_roles_count = 0
-        missing_perms_count = 0
-        skipped_existing_links = 0
-
-        for role_name, permission_keys in role_permission_mapping.items():
-            role_id = role_id_map.get(role_name)
-            if not role_id:
-                print(f"  CRITICAL WARNING: Rol '{role_name}' no tiene ID, omitiendo sus permisos.")
-                missing_roles_count += 1
-                continue
-
-            for perm_key in permission_keys:
-                permission_id = permission_key_to_id_map.get(perm_key) # Usa el mapa con clave string
-                if not permission_id:
-                    # Este es el warning que viste
-                    print(f"  CRITICAL WARNING: Permiso '{perm_key}' no tiene ID para rol '{role_name}', omitiendo.")
-                    missing_perms_count += 1
-                    continue
-
-                if (role_id, permission_id) not in existing_links_set:
-                    rol_permiso_entries_to_insert.append({'rol_id': role_id, 'permiso_id': permission_id})
-                else:
-                    skipped_existing_links += 1
-
-        if missing_roles_count > 0 or missing_perms_count > 0:
-            print(f"Resumen de WARNINGS CRÍTICOS: {missing_roles_count} roles sin ID, {missing_perms_count} permisos sin ID.")
-
-        if skipped_existing_links > 0:
-            print(f"Se omitieron {skipped_existing_links} asociaciones rol-permiso que ya existían.")
-
-        if rol_permiso_entries_to_insert:
-            print(f"Insertando {len(rol_permiso_entries_to_insert)} nuevas asociaciones rol-permiso...")
-            op.bulk_insert(rol_permiso_table, rol_permiso_entries_to_insert)
-            print("Nuevas asociaciones insertadas.")
-        else:
-            print("No hay nuevas asociaciones rol-permiso para insertar.")
-
-        session.commit()
-        print("Poblado inicial (seeding) idempotente completado exitosamente.")
+        # --- Insertar Asociaciones RolPermiso (ELIMINADO de la migración) ---
+        print("(Migration) Seeding de roles/permisos base completado. Las asociaciones se crearán en conftest.")
 
     except Exception as e:
         session.rollback()
-        print(f"ERROR durante el poblado inicial (seeding): {e}")
+        print(f"ERROR durante migración de seeding (roles/permisos base): {e}")
         raise
     finally:
         session.close()
 
-
-
 def downgrade() -> None:
+    bind = op.get_bind()
+    session = sa.orm.Session(bind=bind)
+
+    try:
+        print("(Migration) Ejecutando downgrade de roles y permisos base...")
+
+        # Obtener nombres/claves para identificar qué eliminar (solo roles y permisos)
+        role_names_to_delete = [r['nombre'] for r in initial_roles]
+        perm_keys_to_delete = [f"{p['nombre_accion']}:{p['nombre_recurso']}" for p in initial_permissions]
+
+        # Obtener IDs actuales de la DB
+        roles_db = session.execute(
+            select(rol_table.c.id).where(rol_table.c.nombre.in_(role_names_to_delete))
+        ).fetchall()
+        role_ids_to_delete = [r.id for r in roles_db]
+
+        permissions_db = session.execute(
+            select(permiso_table.c.id, permiso_table.c.nombre_accion, permiso_table.c.nombre_recurso)
+        ).fetchall()
+        permission_ids_to_delete = [
+            p.id for p in permissions_db
+            if f"{p.nombre_accion}:{p.nombre_recurso}" in perm_keys_to_delete
+        ]
+
+        # --- Eliminar de rol_permiso (ELIMINADO de downgrade) ---
+        # Ya no es necesario porque upgrade no los crea y la BD usa CASCADE
+        # if role_ids_to_delete or permission_ids_to_delete:
+        #    print("Saltando eliminación de rol_permiso (manejado por CASCADE o no creado aquí)")
+        #    # delete_stmt = rol_permiso_table.delete().where(...)
+        #    # session.execute(delete_stmt)
+
+        # --- Eliminar permisos ---
+        if permission_ids_to_delete:
+            print(f"Eliminando {len(permission_ids_to_delete)} permisos base...")
+            delete_stmt = permiso_table.delete().where(permiso_table.c.id.in_(permission_ids_to_delete))
+            result = session.execute(delete_stmt)
+            print(f"Permisos eliminados: {result.rowcount}")
+        else:
+            print("No se encontraron permisos base para eliminar.")
+
+        # --- Eliminar roles ---
+        if role_ids_to_delete:
+             print(f"Eliminando {len(role_ids_to_delete)} roles base...")
+             # Antes de eliminar roles, las FK en usuario_rol y rol_permiso con ON DELETE CASCADE
+             # deberían eliminar las filas asociadas automáticamente si la BD está bien configurada.
+             delete_stmt = rol_table.delete().where(rol_table.c.id.in_(role_ids_to_delete))
+             result = session.execute(delete_stmt)
+             print(f"Roles eliminados: {result.rowcount}")
+        else:
+            print("No se encontraron roles base para eliminar.")
+
+        session.commit()
+        print("(Migration) Downgrade de roles/permisos base completado.")
+
+    except Exception as e:
+        session.rollback()
+        print(f"ERROR durante downgrade de roles/permisos base: {e}")
+        raise
+    finally:
+        session.close()
     # El downgrade sigue siendo el mismo, ya que elimina específicamente
     # los roles/permisos/asociaciones definidos en esta migración,
     # independientemente de si ya existían antes o fueron creados aquí.

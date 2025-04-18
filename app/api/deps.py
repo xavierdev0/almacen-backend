@@ -74,11 +74,22 @@ async def get_current_user(
             raise auth_exception("Usuario asociado al token no encontrado.")
 
         logger.debug(f"Usuario autenticado: ID={user.id}, Username='{user.username}'")
+        # Log de verificación carga eager (más detallado)
         if user.roles:
             perm_count = sum(len(r.permisos) if r.permisos else 0 for r in user.roles)
-            logger.debug(f"Carga Eager: Usuario ID={user.id} tiene {len(user.roles)} roles y un total de {perm_count} permisos asociados cargados.")
+            role_names_str = ', '.join([r.nombre for r in user.roles])
+            logger.debug(f"*** EAGER LOAD CHECK Usuario ID={user.id}: Roles cargados=[{role_names_str}], Permisos totales cargados={perm_count} ***")
+            # Log adicional para ver si la lista de permisos está realmente poblada
+            for r in user.roles:
+                if r.permisos is None:
+                    logger.warning(f"*** EAGER LOAD CHECK: Rol '{r.nombre}' (ID={r.id}) tiene 'permisos' como None! ***")
+                elif len(r.permisos) == 0:
+                     logger.debug(f"*** EAGER LOAD CHECK: Rol '{r.nombre}' (ID={r.id}) tiene lista 'permisos' vacía. ***")
+                # else:
+                #     logger.debug(f"*** EAGER LOAD CHECK: Rol '{r.nombre}' (ID={r.id}) tiene {len(r.permisos)} permisos cargados. ***")
+
         else:
-            logger.debug(f"Carga Eager: Usuario ID={user.id} no tiene roles asignados.")
+            logger.debug(f"*** EAGER LOAD CHECK Usuario ID={user.id}: No tiene roles asignados. ***")
 
         return user
 
@@ -155,63 +166,125 @@ def require_admin_role(
         )
     # Si tiene el rol, simplemente permite continuar (no devuelve nada)
     logger.debug(f"Acceso admin permitido para Usuario ID: {current_user.id} ('{current_user.username}')")
-
-
 def require_permission(required_permission: str) -> Callable:
     """
     Fábrica que crea una dependencia de FastAPI para verificar si el usuario
     activo tiene un permiso específico.
-
-    El permiso debe estar en formato 'accion:recurso'.
-
-    Ejemplo de uso en un endpoint:
-        @router.get("/ruta", dependencies=[Depends(require_permission("leer:recurso"))])
-
-    Args:
-        required_permission: El string del permiso requerido (ej: "crear:proforma").
-
-    Returns:
-        Una función de dependencia callable para FastAPI.
     """
     async def _permission_check(
         current_user: Annotated[Usuario, Depends(get_current_active_user)]
     ):
-        """
-        Función de dependencia interna que realiza la verificación.
-        Es llamada por FastAPI para cada solicitud al endpoint protegido.
-        """
+        """Dependencia interna que realiza la verificación."""
+        # Restaurado a logger.debug
+        logger.debug(f"--- Iniciando require_permission para '{required_permission}' ---")
+        logger.debug(f"Usuario actual: ID={current_user.id}, Username='{current_user.username}'")
+
         user_permissions: Set[str] = set()
-        if current_user.roles:
+        if not current_user.roles:
+             # Mantenido como warning
+             logger.warning(f"Usuario ID={current_user.id} no tiene roles asignados.")
+        else:
+            logger.debug(f"Roles encontrados para Usuario ID={current_user.id}: {[r.nombre for r in current_user.roles]}")
             for role in current_user.roles:
-                # Verificar si los permisos del rol están cargados (deberían estarlo por selectinload)
-                if role.permisos is not None:
+                logger.debug(f"Procesando Rol: ID={role.id}, Nombre='{role.nombre}'")
+                # Verificar si la relación permisos está cargada
+                if hasattr(role, 'permisos') and role.permisos is not None:
+                    logger.debug(f"  Atributo 'permisos' existe y no es None para Rol '{role.nombre}'. Contiene {len(role.permisos)} elementos.")
+                    perm_count_in_role = 0
                     for permission in role.permisos:
-                        permission_str = f"{permission.nombre_accion}:{permission.nombre_recurso}"
-                        user_permissions.add(permission_str)
+                        # Verificar si el objeto permission es válido y tiene los atributos esperados
+                        if hasattr(permission, 'nombre_accion') and hasattr(permission, 'nombre_recurso'):
+                            permission_str = f"{permission.nombre_accion}:{permission.nombre_recurso}"
+                            user_permissions.add(permission_str)
+                            perm_count_in_role += 1
+                            # logger.debug(f"    Añadido permiso: {permission_str}") # Descomentar si es necesario
+                        else:
+                             # Mantenido como error
+                            logger.error(f"    ERROR: Objeto permiso inválido o atributos faltantes en Rol ID={role.id}: {permission}")
+                    logger.debug(f"  Se añadieron {perm_count_in_role} permisos del Rol '{role.nombre}' al set.")
                 else:
-                    # Esto indicaría un problema con la carga eager o la relación
-                    logger.warning(f"Permisos no cargados para el rol ID={role.id} ('{role.nombre}') "
-                                   f"del usuario ID={current_user.id}. Verifique la carga eager en get_current_user.")
+                    # Mantenido como error crítico
+                    logger.error(f"  ERROR CRÍTICO: La relación 'permisos' NO está cargada o es None para el Rol ID={role.id} ('{role.nombre}') del usuario ID={current_user.id}.")
 
+        # Restaurado a logger.debug
+        logger.debug(f"Set final de permisos agregados para Usuario ID={current_user.id}: {user_permissions}")
 
-        logger.debug(f"Permisos agregados para Usuario ID={current_user.id}: {user_permissions}")
-
-        # Verificar si el permiso requerido está en el conjunto de permisos del usuario
+        # Verificar si el permiso requerido está en el conjunto
         if required_permission not in user_permissions:
+            # Mantenido como warning
             logger.warning(
-                f"Acceso denegado para Usuario ID={current_user.id} ('{current_user.username}'). "
-                f"Permiso requerido: '{required_permission}'. Permisos del usuario: {user_permissions}"
+                f"Acceso DENEGADO para Usuario ID={current_user.id} ('{current_user.username}'). "
+                f"Permiso requerido: '{required_permission}'. Permisos encontrados: {user_permissions}"
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Permiso insuficiente: Se requiere '{required_permission}'."
             )
         else:
+            # Restaurado a logger.debug
             logger.debug(
-                f"Acceso permitido para Usuario ID={current_user.id} ('{current_user.username}'). "
-                f"Permiso requerido '{required_permission}' encontrado."
+                f"Acceso PERMITIDO para Usuario ID={current_user.id}. "
+                f"Permiso requerido '{required_permission}' encontrado en {user_permissions}."
             )
-            # Si el permiso existe, la dependencia pasa sin hacer nada más.
 
-    # La fábrica devuelve la función interna que FastAPI usará como dependencia
+    return _permission_check
+    """
+    Fábrica que crea una dependencia de FastAPI para verificar si el usuario
+    activo tiene un permiso específico. (CON PRINTS PARA DEBUG)
+    """
+    async def _permission_check(
+        current_user: Annotated[Usuario, Depends(get_current_active_user)]
+    ):
+        """Dependencia interna que realiza la verificación."""
+        print(f"\n--- DEBUG [require_permission] para '{required_permission}' ---") # <-- PRINT
+        print(f"--- DEBUG Usuario: ID={current_user.id}, Username='{current_user.username}'") # <-- PRINT
+
+        user_permissions: Set[str] = set()
+        if not current_user.roles:
+             print(f"--- WARNING Usuario ID={current_user.id} no tiene roles asignados.") # <-- PRINT (era warning)
+        else:
+            print(f"--- DEBUG Roles encontrados: {[r.nombre for r in current_user.roles]}") # <-- PRINT
+            for role in current_user.roles:
+                print(f"--- DEBUG Procesando Rol: ID={role.id}, Nombre='{role.nombre}'") # <-- PRINT
+                # Verificar si la relación permisos está cargada y es accesible
+                if hasattr(role, 'permisos') and role.permisos is not None:
+                    print(f"--- DEBUG  Rol '{role.nombre}' - Atributo 'permisos' existe y no es None. Intentando iterar...") # <-- PRINT
+                    perm_count_in_role = 0
+                    try:
+                        # Iterar para construir el conjunto
+                        for permission in role.permisos:
+                            if hasattr(permission, 'nombre_accion') and hasattr(permission, 'nombre_recurso'):
+                                permission_str = f"{permission.nombre_accion}:{permission.nombre_recurso}"
+                                user_permissions.add(permission_str)
+                                perm_count_in_role += 1
+                                # print(f"    Añadido permiso: {permission_str}") # Descomentar si es necesario ver cada uno
+                            else:
+                                print(f"    ERROR: Objeto permiso inválido o atributos faltantes en Rol ID={role.id}: {permission}") # <-- PRINT (era error)
+                        print(f"--- DEBUG  Rol '{role.nombre}' - Se añadieron {perm_count_in_role} permisos al set.") # <-- PRINT
+                    except Exception as iter_exc:
+                        # Capturar error si la iteración sobre role.permisos falla
+                        print(f"--- ERROR CRÍTICO al iterar role.permisos para Rol ID={role.id}: {iter_exc}") # <-- PRINT
+
+                else:
+                    # Si esto se imprime, la carga eager falló o la relación está rota
+                    print(f"--- ERROR CRÍTICO: La relación 'permisos' NO está cargada o es None para el Rol ID={role.id} ('{role.nombre}') del usuario ID={current_user.id}.") # <-- PRINT (era error)
+
+        print(f"--- DEBUG Set final de permisos agregados: {user_permissions}") # <-- PRINT (era debug)
+
+        # Verificar si el permiso requerido está en el conjunto
+        if required_permission not in user_permissions:
+            print( # <-- PRINT (era warning)
+                f"--- ACCESS DENIED para Usuario ID={current_user.id}. "
+                f"Req: '{required_permission}'. Found: {user_permissions}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permiso insuficiente: Se requiere '{required_permission}'."
+            )
+        else:
+            print( # <-- PRINT (era debug)
+                f"--- ACCESS GRANTED para Usuario ID={current_user.id}. "
+                f"Req: '{required_permission}'. Found in {user_permissions}."
+            )
+
     return _permission_check

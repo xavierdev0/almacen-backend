@@ -35,8 +35,9 @@ router = APIRouter(
 def create_rol(
     *,
     db: Annotated[Session, Depends(get_db)],
-    rol_in: RolCreate
-    # Ya no necesitamos current_admin aquí explícitamente
+    rol_in: RolCreate,
+    dependencies=[Depends(require_permission("crear:rol"))] # <<<--- AÑADIR ESTA LÍNEA
+
 ):
     """Crea un nuevo rol en el sistema. Requiere permiso 'crear:rol'."""
     logger.info(f"[Permiso: crear:rol] Solicitud para crear rol: {rol_in.nombre}")
@@ -70,6 +71,7 @@ def get_rol(
     *,
     db: Annotated[Session, Depends(get_db)],
     rol_id: int = Path(..., description="ID del rol a obtener", gt=0)
+    
 ):
     """Obtiene detalles de un rol específico, incluyendo sus permisos. Requiere permiso 'leer:rol'."""
     logger.debug(f"[Permiso: leer:rol] Solicitud para obtener rol ID: {rol_id}")
