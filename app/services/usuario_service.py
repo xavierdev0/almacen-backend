@@ -2,18 +2,19 @@
 import logging
 from sqlmodel import Session
 from fastapi import HTTPException, status
-from typing import Optional, Union
-from uuid import UUID
+from typing import Optional, Union, List
+
 import re
 
-from app.models.user_models import Usuario
+from app.models.user_models import Usuario, Rol
 from app.schemas.usuario_schema import UsuarioCreate, UsuarioUpdate, UsuarioUpdatePassword
 from app.repositories import usuario_repository, rol_repository 
 from app.core.security import get_password_hash, verify_password
-from app.core.config import settings
+
 
 logger = logging.getLogger(__name__)
-DEFAULT_ROLE_NAME = "Vendedor"
+
+
 # --- Helpers ---
 def _sanitize_email(email: str) -> str:
     """Normaliza emails a minúsculas y remueve espacios."""
@@ -29,86 +30,114 @@ def _sanitize_username(username: str) -> str:
         )
     return sanitized
 
+
+
 # --- Creación ---
 def create_new_user(db: Session, user_in: UsuarioCreate) -> Usuario:
-    """Crea un nuevo usuario con validación avanzada."""
+    """
+    Crea un nuevo usuario con validación y asignación de roles especificada.
+    Si no se especifican roles, el usuario se crea sin roles iniciales.
+    """
+    # Sanitización y Validación de Duplicados (igual que antes)
     try:
-        # Sanitización
         email = _sanitize_email(user_in.email)
-        username = _sanitize_username(user_in.username)
-        
-        logger.info(f"Creando usuario: {username[:3]}***")  # Log seguro
-        
-        # Verificar duplicados
+        username = _sanitize_username(user_in.username) # Sanitización básica
+
+        logger.info(f"Intentando crear usuario: Username='{username}', Email='{email[:5]}***'")
+
         if usuario_repository.get_usuario_by_email(db, email):
-            logger.warning(f"Email ya registrado: {email[:5]}***")
-            raise HTTPException(status_code=400, detail="Email ya registrado")
+            logger.warning(f"Email ya registrado: '{email[:5]}***'")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El correo electrónico ya está registrado.")
 
         if usuario_repository.get_usuario_by_username(db, username):
-            logger.warning(f"Username ya registrado: {username[:3]}***")
-            raise HTTPException(status_code=400, detail="Username no disponible")
+            logger.warning(f"Username ya registrado: '{username}'")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El nombre de usuario no está disponible.")
 
-        # Validar fortaleza de contraseña
-        #if settings.ENFORCE_PASSWORD_POLICY:
-        #    if len(user_in.password) < 12:
-        #        raise HTTPException(
-        #            status_code=400,
-        #            detail="La contraseña debe tener al menos 12 caracteres"
-        #        )
+        # --- Validación de Roles (NUEVO) ---
+        roles_to_assign: List[Rol] = [] # Lista para guardar objetos Rol validados
+        if user_in.rol_ids:
+            # Eliminar duplicados y ordenar para consistencia
+            unique_rol_ids = sorted(list(set(user_in.rol_ids)))
+            if unique_rol_ids: # Solo proceder si hay IDs únicos
+                logger.info(f"Validando IDs de rol proporcionados: {unique_rol_ids} para usuario '{username}'")
+                # Usar la nueva función del repositorio para buscar roles
+                roles_found = rol_repository.get_roles_by_ids(db=db, role_ids=unique_rol_ids)
 
-        # Crear usuario
+                # Validar que se encontraron todos los roles solicitados
+                if len(roles_found) != len(unique_rol_ids):
+                    found_ids = {role.id for role in roles_found}
+                    missing_ids = [rid for rid in unique_rol_ids if rid not in found_ids]
+                    logger.error(f"No se encontraron los siguientes IDs de rol al crear usuario '{username}': {missing_ids}")
+                    # Usar 404 es apropiado si los IDs de rol no existen
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Uno o más IDs de rol proporcionados no existen: {missing_ids}"
+                    )
+                roles_to_assign = list(roles_found) # Guardar los objetos Rol validados
+                logger.info(f"Roles validados para asignar a '{username}': {[r.nombre for r in roles_to_assign]}")
+            else:
+                 logger.warning(f"Lista de 'rol_ids' proporcionada para usuario '{username}' estaba vacía o contenía solo duplicados.")
+        else:
+             logger.warning(f"No se proporcionaron 'rol_ids' para el nuevo usuario '{username}'. Se creará sin roles iniciales.")
+             # Ya no se asigna el rol 'Vendedor' por defecto
+
+        # --- Creación del Usuario (Preparación) ---
         hashed_password = get_password_hash(user_in.password)
-        user_data_dict = user_in.model_dump(exclude={"password", "email", "username"})
+        # Excluir campos sensibles y el nuevo campo rol_ids del schema
+        user_data_dict = user_in.model_dump(exclude={"password", "rol_ids"})
+
+        # Crear la instancia del modelo Usuario
         db_user = Usuario(
-            email=email,                          # Pasar email sanitizado
-            username=username,                    # Pasar username sanitizado
             contrasena_hash=hashed_password,
-            esta_activo=True,
-            **user_data_dict                      # Pasar el *resto* de los datos (ej: nombre_completo)
+            esta_activo=True, # Los usuarios se crean activos por defecto
+            **user_data_dict # Pasar email, username, nombre_completo, etc.
         )
 
-        created_user = usuario_repository.create_usuario(db, db_user)
-        logger.info(f"Usuario {created_user.id} ({created_user.username}) creado en la BD.")
+        # --- Guardar Usuario en BD ---
+        # Usar la función del repositorio para crear el usuario base
+        created_user = usuario_repository.create_usuario(db=db, usuario_data=db_user)
+        logger.info(f"Usuario ID={created_user.id} ('{created_user.username}') creado en BD.")
 
+        # --- Asignación de Roles (NUEVO) ---
+        if roles_to_assign:
+            logger.info(f"Asignando {len(roles_to_assign)} roles al usuario ID={created_user.id}...")
+            assigned_count = 0
+            # Iterar sobre los objetos Rol validados
+            for rol in roles_to_assign:
+                try:
+                    # Usar la función existente del repositorio para asignar cada rol
+                    # Esta función ya maneja commit y refresh si es necesario internamente (revisar repo)
+                    usuario_repository.assign_rol_to_usuario(
+                        db=db, db_usuario=created_user, db_rol=rol
+                    )
+                    assigned_count += 1
+                except Exception as role_assign_exc:
+                    # Capturar error específico de asignación si ocurre
+                    logger.error(f"Error asignando rol ID={rol.id} ('{rol.nombre}') al usuario ID={created_user.id} "
+                                 f"después de la creación: {role_assign_exc}", exc_info=True)
+                    # Decisión: ¿Continuar asignando otros roles o detenerse y revertir?
+                    # Por simplicidad, continuamos, pero el usuario puede quedar con roles parciales.
+                    # Podría implementarse una lógica de rollback más compleja si es crítico.
 
-        # --- INICIO: Asignar Rol por Defecto ---
-        try:
-            logger.info(f"Intentando asignar rol por defecto '{DEFAULT_ROLE_NAME}' al usuario ID {created_user.id}")
-            default_rol = rol_repository.get_rol_by_name(db, nombre=DEFAULT_ROLE_NAME)
+            logger.info(f"Se asignaron {assigned_count} de {len(roles_to_assign)} roles solicitados al usuario ID={created_user.id}.")
+            # Refrescar el usuario una vez al final para asegurar que la relación roles esté actualizada
+            # si las asignaciones individuales no lo hicieron ya.
+            db.refresh(created_user)
+            # Cargar explícitamente roles si es necesario devolverlos inmediatamente (opcional)
+            # db.refresh(created_user, attribute_names=["roles"])
 
-            if default_rol:
-                # Usamos la función del repositorio que maneja la asignación
-                usuario_repository.assign_rol_to_usuario(
-                    db=db, db_usuario=created_user, db_rol=default_rol
-                )
-                logger.info(f"Rol por defecto '{DEFAULT_ROLE_NAME}' asignado exitosamente al usuario ID {created_user.id}")
-            else:
-                # Si el rol por defecto no existe, solo lo advertimos.
-                # Podrías optar por lanzar un error si el rol es crítico.
-                logger.warning(
-                    f"El rol por defecto '{DEFAULT_ROLE_NAME}' no fue encontrado en la base de datos. "
-                    f"El usuario {created_user.id} fue creado sin este rol."
-                )
-        except Exception as role_exc:
-            # Loggear el error específico de la asignación de rol, pero no necesariamente
-            # revertir la creación del usuario, a menos que sea un requisito crítico.
-            logger.error(
-                f"Error asignando el rol por defecto '{DEFAULT_ROLE_NAME}' al usuario ID {created_user.id}: {role_exc}",
-                exc_info=True
-            )
-            # Considerar si se debe relanzar la excepción o manejarla aquí.
-            # Por ahora, solo loggeamos y continuamos.
+        # --- Lógica de Asignación de Rol por Defecto ELIMINADA ---
 
+        return created_user # Devolver el usuario creado
 
-        return created_user
-
-    except HTTPException:
-        raise
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as e:
-        logger.error(f"Error creando usuario: {str(e)}", exc_info=True)
+        logger.error(f"Error inesperado en create_new_user para username='{user_in.username}': {e}", exc_info=True)
+        db.rollback()
         raise HTTPException(
-            status_code=500,
-            detail="Error interno al crear el usuario"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno del servidor al crear el usuario."
         )
 
 # --- Actualización de Perfil ---
@@ -125,17 +154,6 @@ def update_user_profile(db: Session, *, current_user: Usuario, user_in: UsuarioU
                 if existing:
                     raise HTTPException(400, "Email ya en uso")
                 update_data["email"] = new_email
-
-
-        # Si se desea tambien permitir la actualizacion del username se debe actualizar
-        # el Schema UsuarioUpdate
-        #if "username" in update_data:
-        #    new_username = _sanitize_username(update_data["username"])
-        #    if new_username != current_user.username:
-        #        existing = usuario_repository.get_usuario_by_username(db, new_username)
-        #        if existing:
-        #            raise HTTPException(400, "Username no disponible")
-        #        update_data["username"] = new_username
 
         updated_user = usuario_repository.update_usuario(
             db, 
@@ -195,3 +213,98 @@ def get_user_info(db: Session, user_id: Optional[int]) -> Usuario:
     except Exception as e:
         logger.error(f"Error obteniendo usuario: {str(e)}")
         raise HTTPException(500, "Error interno al recuperar usuario")
+    
+
+
+def assign_role_to_user_service(db: Session, *, user_id: int, rol_id: int) -> Usuario:
+    """
+    Asigna un rol existente a un usuario existente.
+
+    Args:
+        db: Sesión de base de datos.
+        user_id: ID del usuario al que se asignará el rol.
+        rol_id: ID del rol a asignar.
+
+    Returns:
+        El objeto Usuario actualizado.
+
+    Raises:
+        HTTPException: 404 si el usuario o el rol no existen,
+                       500 si ocurre un error interno.
+                       (Nota: El repo maneja el caso de asignación ya existente sin error).
+    """
+    logger.info(f"Intentando asignar rol ID={rol_id} a usuario ID={user_id}")
+    # Obtener el usuario (lanza 404 si no existe)
+    db_user = get_user_info(db=db, user_id=user_id)
+    # Obtener el rol (lanza 404 si no existe)
+    # Usamos include_permissions=False ya que no necesitamos los permisos del rol aquí
+    db_rol = rol_service.get_rol_by_id(db=db, rol_id=rol_id, include_permissions=False)
+
+    try:
+        # Llamar a la función del repositorio que maneja la asignación
+        # (incluyendo la verificación de si ya existe)
+        updated_user = usuario_repository.assign_rol_to_usuario(
+            db=db, db_usuario=db_user, db_rol=db_rol
+        )
+        # El repositorio ya hizo commit y refresh
+        return updated_user
+    except HTTPException:
+        # Relanzar excepciones HTTP específicas del repositorio si las hubiera
+        raise
+    except Exception as e:
+        # Capturar otros errores inesperados
+        logger.error(f"Error inesperado asignando rol ID={rol_id} a usuario ID={user_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno del servidor al asignar el rol."
+        )
+
+
+def remove_role_from_user_service(db: Session, *, user_id: int, rol_id: int) -> Usuario:
+    """
+    Quita un rol previamente asignado de un usuario.
+
+    Args:
+        db: Sesión de base de datos.
+        user_id: ID del usuario del que se quitará el rol.
+        rol_id: ID del rol a quitar.
+
+    Returns:
+        El objeto Usuario actualizado.
+
+    Raises:
+        HTTPException: 404 si el usuario o el rol no existen,
+                       500 si ocurre un error interno.
+                       (Nota: El repo maneja el caso de asignación no existente sin error).
+    """
+    logger.info(f"Intentando quitar rol ID={rol_id} de usuario ID={user_id}")
+    # Obtener el usuario
+    db_user = get_user_info(db=db, user_id=user_id)
+    # Obtener el rol
+    db_rol = rol_service.get_rol_by_id(db=db, rol_id=rol_id, include_permissions=False)
+
+    # --- Lógica de Negocio Adicional (Opcional - TODO) ---
+    # Ej: Prevenir quitar el último rol 'Administrador' si es el único admin?
+    # Ej: Prevenir quitarse el rol 'Administrador' a sí mismo?
+    # if db_rol.nombre == "Administrador":
+    #     # Verificar si es el último admin o si se está quitando a sí mismo...
+    #     # logger.warning("Intento de eliminar rol Administrador no permitido bajo ciertas condiciones.")
+    #     # raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Acción no permitida sobre el rol Administrador.")
+    # --- Fin Lógica Adicional ---
+
+    try:
+        # Llamar a la función del repositorio que maneja la eliminación
+        # (incluyendo la verificación de si la asignación existe)
+        updated_user = usuario_repository.remove_rol_from_usuario(
+            db=db, db_usuario=db_user, db_rol=db_rol
+        )
+        # El repositorio ya hizo commit y refresh
+        return updated_user
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error inesperado quitando rol ID={rol_id} de usuario ID={user_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno del servidor al quitar el rol."
+        )

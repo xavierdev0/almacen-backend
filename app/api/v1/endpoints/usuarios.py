@@ -1,112 +1,225 @@
 # app/api/v1/endpoints/usuarios.py
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlmodel import Session
-from typing import Annotated
 import logging
-from uuid import UUID
+from typing import List, Optional, Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Path, Response
+from sqlmodel import Session
 
 from app.core.database import get_db
+# Importar dependencias necesarias
+from app.api.deps import get_db, get_current_active_user, require_permission # Cambiar require_admin_role por require_permission
+from app.models import Usuario
 from app.services import usuario_service
 from app.schemas.usuario_schema import (
-    UsuarioCreate, 
-    UsuarioRead, 
-    UsuarioUpdate, 
+    UsuarioCreate,
+    UsuarioRead,
+    UsuarioUpdate,
     UsuarioUpdatePassword
 )
-from app.api.deps import get_current_active_user
-from app.models.user_models import Usuario
+from app.schemas.rol_permiso_schema import RolRead
 
-router = APIRouter(tags=["users"])
+router = APIRouter(prefix="/usuarios", tags=["Usuarios"]) # O "Users"
 logger = logging.getLogger(__name__)
 
 # --- Creación de Usuario ---
 @router.post(
-    "", 
-    response_model=UsuarioRead, 
+    "", # Ruta base del router de usuarios (ej: /api/v1/usuarios)
+    response_model=UsuarioRead, # Devuelve el usuario creado con sus roles
     status_code=status.HTTP_201_CREATED,
-    summary="Crear nuevo usuario"
+    summary="Crear un nuevo usuario",
+    dependencies=[Depends(require_permission("crear:usuario"))], # <--- PERMISO ESPECÍFICO
+    responses={
+        400: {"description": "Datos inválidos"},
+        404: {"description": "Uno o más IDs de rol no existen"},
+        403: {"description": "Permiso insuficiente"} 
+    }
 )
 def create_user(
+    *,
     db: Annotated[Session, Depends(get_db)],
     user_in: UsuarioCreate
 ):
-    """Endpoint público para registro de nuevos usuarios."""
-    try:
-        logger.info(f"Creando usuario: {user_in.username[:3]}***")
-        return usuario_service.create_new_user(db, user_in)
-    except Exception as e:
-        logger.error(f"Error creando usuario: {str(e)}", exc_info=True)
-        raise
+    """
+    Crea un nuevo usuario en el sistema especificando sus datos y roles iniciales.
 
-# --- Usuario Actual ---
+    - **Requiere permiso:** `crear:usuario`.
+    - Permite asignar roles mediante la lista `rol_ids`.
+    """
+    # Log indicando la acción protegida
+    logger.info(f"[Permiso: crear:usuario] Solicitud para crear usuario: {user_in.username}")
+    try:
+        new_user = usuario_service.create_new_user(db=db, user_in=user_in)
+        return new_user
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        logger.error(f"Error inesperado al crear usuario '{user_in.username}': {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno del servidor al crear el usuario."
+        )
+
+
+# --- Endpoints /me (Solo requieren usuario activo, sin permiso específico) ---
 @router.get(
     "/me",
     response_model=UsuarioRead,
     summary="Obtener datos del usuario autenticado"
+    # No requiere permiso específico más allá de estar autenticado y activo
 )
 def read_users_me(
     current_user: Annotated[Usuario, Depends(get_current_active_user)]
 ):
-    """Obtiene los datos del usuario autenticado."""
+    """Obtiene los datos del usuario autenticado (incluyendo sus roles)."""
     logger.info(f"Solicitud de datos para usuario ID: {current_user.id}")
     return current_user
 
-# --- Actualización de Perfil ---
 @router.patch(
     "/me",
     response_model=UsuarioRead,
-    summary="Actualizar perfil del usuario"
+    summary="Actualizar perfil del usuario autenticado"
+    # No requiere permiso específico
 )
 def update_self(
+    *,
     db: Annotated[Session, Depends(get_db)],
     update_data: UsuarioUpdate,
     current_user: Annotated[Usuario, Depends(get_current_active_user)]
 ):
-    """Permite actualizar información del perfil."""
+    """Permite al usuario autenticado actualizar su propio perfil."""
+    logger.info(f"Actualizando perfil propio para usuario ID: {current_user.id}")
     try:
-        logger.info(f"Actualizando usuario ID: {current_user.id}")
-        return usuario_service.update_user_profile(
-                                                    db=db,
-                                                    current_user=current_user,
-                                                    user_in=update_data # Match the parameter name 'user_in' in the service function definition
-                                                )
+        updated_user = usuario_service.update_user_profile(
+            db=db, current_user=current_user, user_in=update_data
+        )
+        return updated_user
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as e:
-        logger.error(f"Error actualizando perfil: {str(e)}")
-        raise HTTPException(500, "Error interno al actualizar")
+        logger.error(f"Error actualizando perfil propio (ID: {current_user.id}): {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al actualizar el perfil.")
 
-# --- Actualización de Contraseña ---
 @router.put(
     "/me/password",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Cambiar contraseña"
+    summary="Cambiar contraseña del usuario autenticado"
+    # No requiere permiso específico
 )
 def update_password(
+    *,
     db: Annotated[Session, Depends(get_db)],
     password_data: UsuarioUpdatePassword,
     current_user: Annotated[Usuario, Depends(get_current_active_user)]
 ):
-    """Endpoint para cambio de contraseña."""
+    """Endpoint para que el usuario autenticado cambie su propia contraseña."""
+    logger.info(f"Solicitando cambio de contraseña para usuario ID: {current_user.id}")
     try:
-        logger.info(f"Cambiando contraseña usuario ID: {current_user.id}")
         usuario_service.update_user_password(db=db, current_user=current_user, password_in=password_data)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as e:
-        logger.error(f"Error cambiando contraseña: {str(e)}")
-        raise HTTPException(500, "Error interno al actualizar contraseña")
+        logger.error(f"Error cambiando contraseña propia (ID: {current_user.id}): {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al actualizar contraseña.")
 
-# --- Endpoints Admin (Ejemplo) ---
+
+
+
+# --- Endpoints Admin sobre Usuarios Específicos ---
+
 @router.get(
     "/{user_id}",
     response_model=UsuarioRead,
-    summary="Obtener usuario por ID (Admin)",
-    dependencies=[Depends(get_current_active_user)]  # + dependencia de rol
+    summary="Obtener usuario por ID", # Ya no necesita (Admin) aquí
+    # Aplicar permiso específico
+    dependencies=[Depends(require_permission("leer:usuario"))], # <--- PERMISO ESPECÍFICO
+    responses={404: {"description": "Usuario no encontrado"},
+               403: {"description": "Permiso insuficiente"}}
 )
 def get_user(
+    *,
     db: Annotated[Session, Depends(get_db)],
-    user_id: int
+    user_id: int = Path(..., description="ID del usuario a obtener", gt=0)
 ):
-    """Endpoint administrativo para obtener cualquier usuario."""
+    """
+    Obtiene información de cualquier usuario por su ID.
+    - **Requiere permiso:** `leer:usuario`.
+    """
+    logger.info(f"[Permiso: leer:usuario] Solicitud para obtener usuario ID: {user_id}")
     try:
-        return usuario_service.get_user_info(db, user_id)
+        user = usuario_service.get_user_info(db=db, user_id=user_id)
+        return user
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as e:
-        logger.error(f"Error obteniendo usuario {user_id}: {str(e)}")
-        raise HTTPException(500, "Error interno al recuperar usuario")
+        logger.error(f"Error obteniendo usuario ID {user_id}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al recuperar usuario.")
+
+
+@router.post(
+    "/{user_id}/roles/{rol_id}",
+    response_model=UsuarioRead,
+    status_code=status.HTTP_200_OK,
+    summary="Asignar un Rol a un Usuario",
+    # Aplicar permiso específico
+    dependencies=[Depends(require_permission("asignar:rol_usuario"))], # <--- PERMISO ESPECÍFICO
+    responses={
+        404: {"description": "Usuario o Rol no encontrado"},
+        403: {"description": "Permiso insuficiente"}
+    }
+)
+def assign_role_to_user_endpoint(
+    *,
+    db: Annotated[Session, Depends(get_db)],
+    user_id: int = Path(..., description="ID del usuario al que asignar el rol", gt=0),
+    rol_id: int = Path(..., description="ID del rol a asignar", gt=0)
+):
+    """
+    Asigna un rol específico a un usuario específico.
+    - **Requiere permiso:** `asignar:rol_usuario`.
+    """
+    logger.info(f"[Permiso: asignar:rol_usuario] Solicitud para asignar rol ID={rol_id} a usuario ID={user_id}")
+    try:
+        updated_user = usuario_service.assign_role_to_user_service(
+            db=db, user_id=user_id, rol_id=rol_id
+        )
+        return updated_user
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        logger.error(f"Error inesperado asignando rol ID={rol_id} a usuario ID={user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor.")
+
+
+@router.delete(
+    "/{user_id}/roles/{rol_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Quitar un Rol de un Usuario",
+    # Aplicar permiso específico
+    dependencies=[Depends(require_permission("remover:rol_usuario"))], # <--- PERMISO ESPECÍFICO
+    responses={
+        404: {"description": "Usuario o Rol no encontrado"},
+        403: {"description": "Permiso insuficiente"}
+    }
+)
+def remove_role_from_user_endpoint(
+    *,
+    db: Annotated[Session, Depends(get_db)],
+    user_id: int = Path(..., description="ID del usuario del que quitar el rol", gt=0),
+    rol_id: int = Path(..., description="ID del rol a quitar", gt=0)
+):
+    """
+    Quita la asignación de un rol específico a un usuario específico.
+    - **Requiere permiso:** `remover:rol_usuario`.
+    """
+    logger.info(f"[Permiso: remover:rol_usuario] Solicitud para quitar rol ID={rol_id} de usuario ID={user_id}")
+    try:
+        usuario_service.remove_role_from_user_service(
+            db=db, user_id=user_id, rol_id=rol_id
+        )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        logger.error(f"Error inesperado quitando rol ID={rol_id} de usuario ID={user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno del servidor.")

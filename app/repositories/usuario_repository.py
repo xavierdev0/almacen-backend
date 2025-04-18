@@ -2,10 +2,10 @@
 from sqlmodel import Session, select, SQLModel
 from typing import Optional, Sequence, Union, Dict, Any
 import logging
-from uuid import UUID
 
 from app.models.user_models import Usuario, Rol, UsuarioRol
 from app.schemas.usuario_schema import UsuarioUpdate
+from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
 
@@ -28,29 +28,42 @@ def get_usuario_by_email(db: Session, email: str) -> Optional[Usuario]:
         logger.error(f"Error obteniendo usuario {email}: {str(e)}")
         raise
     
-def get_usuario(db: Session, user_id: Union[int, UUID]) -> Optional[Usuario]:
+def get_usuario(db: Session, user_id: int) -> Optional[Usuario]:
     """Obtiene un usuario por su ID."""
     try:
-        return db.get(Usuario, user_id)
+        statement = (
+            select(Usuario)
+            .where(Usuario.id == user_id)
+            .options(selectinload(Usuario.roles)) # <-- AÑADIDO: Carga Eager de roles
+        )
+        user = db.exec(statement).first()
+        return user
     except Exception as e:
         logger.error(f"Error obteniendo usuario ID {user_id}: {str(e)}")
         raise
 
 def get_usuarios(
-    db: Session, 
-    skip: int = 0, 
+    db: Session,
+    skip: int = 0,
     limit: int = 100,
     filters: Optional[Dict[str, Any]] = None
 ) -> Sequence[Usuario]:
-    """Lista usuarios con paginación y filtros opcionales."""
     try:
         query = select(Usuario)
-        
         if filters:
             for field, value in filters.items():
-                query = query.where(getattr(Usuario, field) == value)
-                
-        return db.exec(query.offset(skip).limit(limit)).all()
+                # Asegurarse que el campo existe en el modelo Usuario
+                if hasattr(Usuario, field):
+                    query = query.where(getattr(Usuario, field) == value)
+                else:
+                    logger.warning(f"Intento de filtrar por campo inexistente en Usuario: {field}")
+        # Considerar cargar roles aquí también si se listan usuarios con sus roles
+        query = query.options(selectinload(Usuario.roles))
+        query = query.offset(skip).limit(limit)
+
+        users = db.exec(query).all()
+        return users
+    
     except Exception as e:
         logger.error(f"Error listando usuarios: {str(e)}")
         raise
@@ -67,7 +80,7 @@ def create_usuario(db: Session, usuario_data: Union[Usuario, Dict[str, Any]]) ->
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
-        logger.info(f"Usuario creado: {db_user.email}")
+        logger.info(f"Usuario creado: ID={db_user.id}, Username='{db_user.username}'")
         return db_user
     except Exception as e:
         db.rollback()
@@ -88,7 +101,7 @@ def update_usuario(
             update_dict = update_data.model_dump(exclude_unset=True)
         
         # Actualización segura excluyendo campos protegidos
-        protected_fields = {"id", "fecha_creacion"}
+        protected_fields = {"id", "fecha_creacion", "contrasena_hash"}
         clean_data = {k: v for k, v in update_dict.items() if k not in protected_fields}
         
         # SQLModel 0.0.14+
@@ -104,14 +117,16 @@ def update_usuario(
         logger.error(f"Error actualizando usuario {db_user.id}: {str(e)}")
         raise
 
-def delete_usuario(db: Session, user_id: Union[int, UUID]) -> Optional[Usuario]:
+def delete_usuario(db: Session, user_id: int) -> Optional[Usuario]:
     """Elimina un usuario de forma segura."""
     try:
         user = db.get(Usuario, user_id)
         if user:
+            user_repr = f"ID={user.id}, Username='{user.username}'"
+            # La FK en usuario_rol tiene ON DELETE CASCADE, las asociaciones se borran solas.
             db.delete(user)
             db.commit()
-            logger.warning(f"Usuario eliminado: {user_id}")
+            logger.warning(f"Usuario eliminado: {user_repr}")
             return user
         return None
     except Exception as e:
@@ -167,3 +182,46 @@ def assign_rol_to_usuario(db: Session, *, db_usuario: Usuario, db_rol: Rol) -> U
             exc_info=True
         )
         raise # Relanzar la excepción para que la capa de servicio la maneje
+
+
+# NUEVA FUNCIÓN para quitar rol
+def remove_rol_from_usuario(db: Session, *, db_usuario: Usuario, db_rol: Rol) -> Usuario:
+    """
+    Quita un rol a un usuario eliminando la entrada en la tabla UsuarioRol.
+    Verifica si la asignación existe antes de intentar eliminarla.
+    """
+    # Buscar la entrada específica en la tabla de enlace
+    link_statement = select(UsuarioRol).where(
+        UsuarioRol.usuario_id == db_usuario.id,
+        UsuarioRol.rol_id == db_rol.id
+    )
+    link_to_delete = db.exec(link_statement).first()
+
+    if not link_to_delete:
+        logger.warning(f"Intento de quitar rol ID={db_rol.id} ('{db_rol.nombre}') de usuario ID={db_usuario.id} ('{db_usuario.username}'), pero la asignación no existe.")
+        # Devolver el usuario sin cambios. No necesariamente un error 404 a nivel de repo.
+        # El servicio decidirá si esto es un 404.
+        return db_usuario
+
+    # Si existe, eliminar la asociación
+    logger.info(f"Quitando rol ID={db_rol.id} ('{db_rol.nombre}') de usuario ID={db_usuario.id} ('{db_usuario.username}')")
+    try:
+        db.delete(link_to_delete)
+        db.commit()
+        # Refrescar el usuario para reflejar el cambio en la relación roles
+        db.refresh(db_usuario)
+        # Cargar explícitamente si es necesario
+        # db.refresh(db_usuario, attribute_names=["roles"])
+        logger.info(f"Rol quitado correctamente.")
+        return db_usuario
+    except Exception as e:
+        db.rollback()
+        logger.error(
+            f"Error quitando rol ID={db_rol.id} de usuario ID={db_usuario.id}: {e}",
+            exc_info=True
+        )
+        # Relanzar para que el servicio lo maneje
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno al quitar el rol al usuario."
+        )

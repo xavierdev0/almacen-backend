@@ -12,6 +12,7 @@ from sqlmodel import Field, Relationship, SQLModel, UniqueConstraint # Asegúrat
 
 class UsuarioRol(SQLModel, table=True):
     """Modelo de tabla de enlace para la relación N:M entre Usuario y Rol."""
+    __tablename__ = "usuario_rol"
     usuario_id: Optional[int] = Field(
         default=None, foreign_key="usuario.id", primary_key=True
     )
@@ -22,6 +23,7 @@ class UsuarioRol(SQLModel, table=True):
 
 class RolPermiso(SQLModel, table=True):
     """Modelo de tabla de enlace para la relación N:M entre Rol y Permiso."""
+    __tablename__ = "rol_permiso"
     rol_id: Optional[int] = Field(
         default=None, foreign_key="rol.id", primary_key=True
     )

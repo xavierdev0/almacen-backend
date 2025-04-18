@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.services import auth_service
 from app.schemas.token_schema import Token
 
-router = APIRouter(tags=["authentication"])
+router = APIRouter(prefix="/auth",tags=["Autenticación"]) 
 logger = logging.getLogger(__name__)
 
 @router.post("/token", response_model=Token)

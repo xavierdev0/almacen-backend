@@ -11,11 +11,8 @@ from pydantic_core.core_schema import FieldValidationInfo
 
 # --- Schemas SQLModel-based ---
 
-class UsuarioCreate(SQLModel):
-    """
-    Schema para crear un nuevo usuario.
-    Recibe datos en el body de la solicitud POST.
-    """
+class UsuarioBase(SQLModel):
+    """Schema base con campos comunes para no repetir."""
     email: EmailStr = Field(
         ..., # Requerido
         description="Correo electrónico único del usuario."
@@ -23,74 +20,79 @@ class UsuarioCreate(SQLModel):
     username: str = Field(
         ..., # Requerido
         min_length=3,
-        max_length=20,
-        description="Nombre de usuario único (3-20 caracteres: minúsculas, números y _)."
-    )
-    password: str = Field(
-        ..., # Requerido
-        min_length=8,
-        max_length=50, # Limitar longitud máxima razonable
-        description="Contraseña del usuario (mínimo 8 caracteres)."
+        max_length=100, # Aumentado por si acaso, DB es 100
+        description="Nombre de usuario único (3-100 caracteres)."
     )
     nombre_completo: Optional[str] = Field(
         default=None,
-        max_length=100,
+        max_length=255, # Coincidir con DB
         description="Nombre completo del usuario (opcional)."
     )
-    # 'esta_activo' generalmente se establece por defecto en la lógica/DB, no en la creación inicial por el usuario.
+
+class UsuarioCreate(UsuarioBase): # Hereda email, username, nombre_completo
+    """
+    Schema para crear un nuevo usuario via API.
+    Permite especificar los roles iniciales.
+    """
+    password: str = Field(
+        ..., # Requerido
+        min_length=8,
+        max_length=50, # Limitar longitud máxima razonable en input
+        description="Contraseña del usuario (mínimo 8 caracteres)."
+    )
+    # --- CAMPO AÑADIDO ---
+    rol_ids: Optional[List[int]] = Field(
+        default=None, # Es opcional proporcionar roles al crear
+        description="Lista opcional de IDs de los roles a asignar inicialmente al usuario."
+    )
 
 
-class UsuarioRead(SQLModel):
+class UsuarioRead(UsuarioBase): # Hereda email, username, nombre_completo
     """
     Schema para devolver información del usuario en respuestas API.
-    Excluye información sensible como la contraseña.
+    Excluye información sensible como la contraseña. Incluye roles.
     """
-    id: int = Field(...)
-    email: EmailStr = Field(...)
-    username: str = Field(...)
-    nombre_completo: Optional[str] = Field(default=None)
-    esta_activo: bool = Field(...)
-    fecha_creacion: Optional[datetime] = Field(...)# Ejemplo dinámico
-    roles: List[RolRead] = []
+    id: int
+    esta_activo: bool
+    fecha_creacion: Optional[datetime] = None
+    # Incluir roles usando el schema RolRead importado
+    roles: List[RolRead] = [] # Lista vacía por defecto
 
-    # Config para permitir la creación desde atributos de objeto ORM
     model_config = {
         "from_attributes": True
     }
-    # Si necesitas devolver roles, añadirías aquí:
-    # roles: List[RolRead] = [] # Necesitarías definir RolRead en rol_schema.py
-
 
 class UsuarioUpdate(SQLModel):
     """
     Schema para actualizar información del perfil de usuario.
-    Todos los campos son opcionales. No incluye cambio de contraseña.
+    Todos los campos son opcionales. No incluye cambio de contraseña ni roles.
     """
     email: Optional[EmailStr] = Field(
         default=None,
         description="Nuevo correo electrónico único (opcional)."
     )
+    username: Optional[str] = Field( # Permitir cambio de username (opcional)
+        default=None,
+        min_length=3,
+        max_length=100,
+        description="Nuevo nombre de usuario único (opcional)."
+    )
     nombre_completo: Optional[str] = Field(
         default=None,
-        max_length=100,
+        max_length=255,
         description="Nuevo nombre completo (opcional)."
     )
     esta_activo: Optional[bool] = Field(
         default=None,
-        description="Estado de activación del usuario (opcional)."
+        description="Estado de activación del usuario (opcional, para Admins)."
     )
-    # Username generalmente no se permite cambiar o requiere lógica especial,
-    # por lo que se omite aquí comúnmente.
-
+    # La asignación de roles se manejará por endpoints específicos (Paso 4)
 
 # --- Schema Pydantic BaseModel ---
 
 class UsuarioUpdatePassword(BaseModel):
     """Schema específico para solicitar un cambio de contraseña."""
-    old_password: str = Field(
-        ...,
-        description="La contraseña actual del usuario."
-        )
+    old_password: str = Field(..., description="La contraseña actual del usuario.")
     new_password: str = Field(
         ...,
         min_length=8,
@@ -99,16 +101,12 @@ class UsuarioUpdatePassword(BaseModel):
     )
     confirm_password: str = Field(
         ...,
-        min_length=8,
-        max_length=50,
         description="Confirmación de la nueva contraseña."
     )
 
-    # Opcional: Validación para asegurar que la nueva contraseña no sea igual a la antigua
-    @field_validator('new_password')
+    # Validación para asegurar que new_password y confirm_password coinciden
+    @field_validator('confirm_password')
     def passwords_match(cls, v: str, info: FieldValidationInfo) -> str:
-        # info.data contiene los datos ya validados del modelo
-        if 'old_password' in info.data and v == info.data['old_password']:
-            raise ValueError('La nueva contraseña no puede ser igual a la anterior.')
+        if 'new_password' in info.data and v != info.data['new_password']:
+            raise ValueError('La nueva contraseña y la confirmación no coinciden.')
         return v
-
