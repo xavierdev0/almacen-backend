@@ -1,9 +1,11 @@
 # app/schemas/usuario_schema.py
 from sqlmodel import SQLModel, Field # Usamos SQLModel para schemas relacionados con la tabla
 from pydantic import BaseModel, EmailStr, field_validator # BaseModel para schemas no mapeados 1:1
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 import re # Para validación con regex
+from .rol_permiso_schema import RolRead
+
 # Importación necesaria para el validador si usas Pydantic v2+
 from pydantic_core.core_schema import FieldValidationInfo
 
@@ -48,7 +50,8 @@ class UsuarioRead(SQLModel):
     username: str = Field(...)
     nombre_completo: Optional[str] = Field(default=None)
     esta_activo: bool = Field(...)
-    fecha_creacion: datetime = Field(...) # Ejemplo dinámico
+    fecha_creacion: Optional[datetime] = Field(...)# Ejemplo dinámico
+    roles: List[RolRead] = []
 
     # Config para permitir la creación desde atributos de objeto ORM
     model_config = {

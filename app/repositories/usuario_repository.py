@@ -4,7 +4,7 @@ from typing import Optional, Sequence, Union, Dict, Any
 import logging
 from uuid import UUID
 
-from app.models.user_models import Usuario
+from app.models.user_models import Usuario, Rol, UsuarioRol
 from app.schemas.usuario_schema import UsuarioUpdate
 
 logger = logging.getLogger(__name__)
@@ -118,3 +118,52 @@ def delete_usuario(db: Session, user_id: Union[int, UUID]) -> Optional[Usuario]:
         db.rollback()
         logger.error(f"Error eliminando usuario {user_id}: {str(e)}")
         raise
+
+
+def assign_rol_to_usuario(db: Session, *, db_usuario: Usuario, db_rol: Rol) -> Usuario:
+    """
+    Asigna un rol a un usuario creando la entrada en la tabla de enlace UsuarioRol.
+
+    Args:
+        db: La sesión de base de datos.
+        db_usuario: El objeto Usuario al que se le asignará el rol.
+        db_rol: El objeto Rol que será asignado.
+
+    Returns:
+        El objeto Usuario actualizado (potencialmente con la relación 'roles' refrescada).
+
+    Raises:
+        Exception: Si ocurre un error durante la operación de base de datos.
+    """
+
+    # Otra forma de verificar sin cargar la relación completa:
+    link_exists_statement = select(UsuarioRol).where(
+        UsuarioRol.usuario_id == db_usuario.id,
+        UsuarioRol.rol_id == db_rol.id
+    )
+    existing_link = db.exec(link_exists_statement).first()
+
+    if existing_link:
+        logger.debug(f"Rol ID {db_rol.id} ya asignado a usuario ID {db_usuario.id}.")
+        # Devolver el usuario sin cambios o refrescado si se prefiere
+        # db.refresh(db_usuario) # Opcional
+        return db_usuario
+
+    logger.info(f"Asignando rol ID {db_rol.id} ({db_rol.nombre}) a usuario ID {db_usuario.id} ({db_usuario.username})")
+    db_usuario_rol = UsuarioRol(usuario_id=db_usuario.id, rol_id=db_rol.id)
+    try:
+        db.add(db_usuario_rol)
+        db.commit()
+        # Refrescar el usuario puede ser necesario para que la colección usuario.roles
+        # refleje inmediatamente el nuevo rol añadido, dependiendo de la configuración
+        # de la sesión y la estrategia de carga de relaciones.
+        db.refresh(db_usuario)
+        logger.info(f"Rol asignado correctamente.")
+        return db_usuario
+    except Exception as e:
+        db.rollback()
+        logger.error(
+            f"Error asignando rol ID {db_rol.id} a usuario ID {db_usuario.id}: {e}",
+            exc_info=True
+        )
+        raise # Relanzar la excepción para que la capa de servicio la maneje

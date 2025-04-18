@@ -8,12 +8,12 @@ import re
 
 from app.models.user_models import Usuario
 from app.schemas.usuario_schema import UsuarioCreate, UsuarioUpdate, UsuarioUpdatePassword
-from app.repositories import usuario_repository
+from app.repositories import usuario_repository, rol_repository 
 from app.core.security import get_password_hash, verify_password
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-
+DEFAULT_ROLE_NAME = "Vendedor"
 # --- Helpers ---
 def _sanitize_email(email: str) -> str:
     """Normaliza emails a minúsculas y remueve espacios."""
@@ -68,7 +68,38 @@ def create_new_user(db: Session, user_in: UsuarioCreate) -> Usuario:
         )
 
         created_user = usuario_repository.create_usuario(db, db_user)
-        logger.info(f"Usuario {created_user.id} creado")
+        logger.info(f"Usuario {created_user.id} ({created_user.username}) creado en la BD.")
+
+
+        # --- INICIO: Asignar Rol por Defecto ---
+        try:
+            logger.info(f"Intentando asignar rol por defecto '{DEFAULT_ROLE_NAME}' al usuario ID {created_user.id}")
+            default_rol = rol_repository.get_rol_by_name(db, nombre=DEFAULT_ROLE_NAME)
+
+            if default_rol:
+                # Usamos la función del repositorio que maneja la asignación
+                usuario_repository.assign_rol_to_usuario(
+                    db=db, db_usuario=created_user, db_rol=default_rol
+                )
+                logger.info(f"Rol por defecto '{DEFAULT_ROLE_NAME}' asignado exitosamente al usuario ID {created_user.id}")
+            else:
+                # Si el rol por defecto no existe, solo lo advertimos.
+                # Podrías optar por lanzar un error si el rol es crítico.
+                logger.warning(
+                    f"El rol por defecto '{DEFAULT_ROLE_NAME}' no fue encontrado en la base de datos. "
+                    f"El usuario {created_user.id} fue creado sin este rol."
+                )
+        except Exception as role_exc:
+            # Loggear el error específico de la asignación de rol, pero no necesariamente
+            # revertir la creación del usuario, a menos que sea un requisito crítico.
+            logger.error(
+                f"Error asignando el rol por defecto '{DEFAULT_ROLE_NAME}' al usuario ID {created_user.id}: {role_exc}",
+                exc_info=True
+            )
+            # Considerar si se debe relanzar la excepción o manejarla aquí.
+            # Por ahora, solo loggeamos y continuamos.
+
+
         return created_user
 
     except HTTPException:
@@ -95,14 +126,16 @@ def update_user_profile(db: Session, *, current_user: Usuario, user_in: UsuarioU
                     raise HTTPException(400, "Email ya en uso")
                 update_data["email"] = new_email
 
-        # Sanitizar username si se permite actualizar
-        if "username" in update_data:
-            new_username = _sanitize_username(update_data["username"])
-            if new_username != current_user.username:
-                existing = usuario_repository.get_usuario_by_username(db, new_username)
-                if existing:
-                    raise HTTPException(400, "Username no disponible")
-                update_data["username"] = new_username
+
+        # Si se desea tambien permitir la actualizacion del username se debe actualizar
+        # el Schema UsuarioUpdate
+        #if "username" in update_data:
+        #    new_username = _sanitize_username(update_data["username"])
+        #    if new_username != current_user.username:
+        #        existing = usuario_repository.get_usuario_by_username(db, new_username)
+        #        if existing:
+        #            raise HTTPException(400, "Username no disponible")
+        #        update_data["username"] = new_username
 
         updated_user = usuario_repository.update_usuario(
             db, 

@@ -18,8 +18,6 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     docs_url=f"{settings.API_V1_STR}/docs",
     redoc_url=f"{settings.API_V1_STR}/redoc",
-    # contact={"name": settings.CONTACT_NAME,"email": settings.CONTACT_EMAIL},
-    # license_info={ "name": settings.LICENSE_NAME}
 )
 
 
