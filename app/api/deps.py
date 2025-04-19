@@ -166,68 +166,8 @@ def require_admin_role(
         )
     # Si tiene el rol, simplemente permite continuar (no devuelve nada)
     logger.debug(f"Acceso admin permitido para Usuario ID: {current_user.id} ('{current_user.username}')")
+
 def require_permission(required_permission: str) -> Callable:
-    """
-    Fábrica que crea una dependencia de FastAPI para verificar si el usuario
-    activo tiene un permiso específico.
-    """
-    async def _permission_check(
-        current_user: Annotated[Usuario, Depends(get_current_active_user)]
-    ):
-        """Dependencia interna que realiza la verificación."""
-        # Restaurado a logger.debug
-        logger.debug(f"--- Iniciando require_permission para '{required_permission}' ---")
-        logger.debug(f"Usuario actual: ID={current_user.id}, Username='{current_user.username}'")
-
-        user_permissions: Set[str] = set()
-        if not current_user.roles:
-             # Mantenido como warning
-             logger.warning(f"Usuario ID={current_user.id} no tiene roles asignados.")
-        else:
-            logger.debug(f"Roles encontrados para Usuario ID={current_user.id}: {[r.nombre for r in current_user.roles]}")
-            for role in current_user.roles:
-                logger.debug(f"Procesando Rol: ID={role.id}, Nombre='{role.nombre}'")
-                # Verificar si la relación permisos está cargada
-                if hasattr(role, 'permisos') and role.permisos is not None:
-                    logger.debug(f"  Atributo 'permisos' existe y no es None para Rol '{role.nombre}'. Contiene {len(role.permisos)} elementos.")
-                    perm_count_in_role = 0
-                    for permission in role.permisos:
-                        # Verificar si el objeto permission es válido y tiene los atributos esperados
-                        if hasattr(permission, 'nombre_accion') and hasattr(permission, 'nombre_recurso'):
-                            permission_str = f"{permission.nombre_accion}:{permission.nombre_recurso}"
-                            user_permissions.add(permission_str)
-                            perm_count_in_role += 1
-                            # logger.debug(f"    Añadido permiso: {permission_str}") # Descomentar si es necesario
-                        else:
-                             # Mantenido como error
-                            logger.error(f"    ERROR: Objeto permiso inválido o atributos faltantes en Rol ID={role.id}: {permission}")
-                    logger.debug(f"  Se añadieron {perm_count_in_role} permisos del Rol '{role.nombre}' al set.")
-                else:
-                    # Mantenido como error crítico
-                    logger.error(f"  ERROR CRÍTICO: La relación 'permisos' NO está cargada o es None para el Rol ID={role.id} ('{role.nombre}') del usuario ID={current_user.id}.")
-
-        # Restaurado a logger.debug
-        logger.debug(f"Set final de permisos agregados para Usuario ID={current_user.id}: {user_permissions}")
-
-        # Verificar si el permiso requerido está en el conjunto
-        if required_permission not in user_permissions:
-            # Mantenido como warning
-            logger.warning(
-                f"Acceso DENEGADO para Usuario ID={current_user.id} ('{current_user.username}'). "
-                f"Permiso requerido: '{required_permission}'. Permisos encontrados: {user_permissions}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permiso insuficiente: Se requiere '{required_permission}'."
-            )
-        else:
-            # Restaurado a logger.debug
-            logger.debug(
-                f"Acceso PERMITIDO para Usuario ID={current_user.id}. "
-                f"Permiso requerido '{required_permission}' encontrado en {user_permissions}."
-            )
-
-    return _permission_check
     """
     Fábrica que crea una dependencia de FastAPI para verificar si el usuario
     activo tiene un permiso específico. (CON PRINTS PARA DEBUG)

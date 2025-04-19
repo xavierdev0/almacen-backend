@@ -43,82 +43,24 @@ engine = create_engine(TEST_DATABASE_URL, echo=False, pool_pre_ping=True)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, class_=Session)
 
 
-# --- 4. Función Auxiliar para Seeding de Asociaciones ---
-def seed_role_permission_links(db: Session):
-    """
-    Puebla la tabla rol_permiso basado en el mapeo inicial.
-    Se ejecuta DESPUÉS de que las migraciones creen las tablas Rol y Permiso.
-    Es idempotente (verifica links existentes antes de insertar).
-    """
-    print("--- [Seeding Fixture] Poblando asociaciones Rol-Permiso ---")
-    try:
-        # Obtener IDs actuales de Roles y Permisos de la BD
-        roles_db = db.exec(select(Rol)).all()
-        perms_db = db.exec(select(Permiso)).all()
-        role_id_map = {r.nombre: r.id for r in roles_db}
-        perm_key_to_id_map = {f"{p.nombre_accion}:{p.nombre_recurso}": p.id for p in perms_db}
-
-        if not role_id_map or not perm_key_to_id_map:
-             print("ERROR (seed_data): No se encontraron roles o permisos base en la BD. ¿Migración falló?")
-             pytest.fail("Roles o Permisos base no encontrados en la BD para el seeding de links.")
-             return
-
-        # Obtener links existentes para evitar duplicados
-        existing_links_db = db.exec(select(RolPermiso.rol_id, RolPermiso.permiso_id)).all()
-        existing_links_set = set(existing_links_db)
-        print(f"DEBUG (seed_data): Encontrados {len(existing_links_set)} links rol-permiso existentes.")
-
-        # Crear entradas faltantes
-        links_to_create: List[RolPermiso] = []
-        for role_name, perm_keys in role_permission_mapping.items():
-            role_id = role_id_map.get(role_name)
-            if not role_id:
-                print(f"  WARNING (seed_data): Rol '{role_name}' del mapeo no encontrado en BD.")
-                continue
-            for perm_key in perm_keys:
-                perm_id = perm_key_to_id_map.get(perm_key)
-                if not perm_id:
-                    print(f"  WARNING (seed_data): Permiso '{perm_key}' del mapeo no encontrado en BD.")
-                    continue
-
-                if (role_id, perm_id) not in existing_links_set:
-                    links_to_create.append(RolPermiso(rol_id=role_id, permiso_id=perm_id))
-
-        if links_to_create:
-            print(f"Insertando {len(links_to_create)} nuevas asociaciones rol-permiso...")
-            db.add_all(links_to_create)
-            db.commit()
-            print("Nuevas asociaciones rol-permiso insertadas correctamente.")
-        else:
-            print("No se encontraron nuevas asociaciones rol-permiso para insertar.")
-
-        print("--- [Seeding Fixture] Poblado de asociaciones completado ---")
-
-    except Exception as e:
-        print(f"ERROR crítico durante seed_role_permission_links: {e}")
-        db.rollback()
-        pytest.fail(f"Fallo durante el seeding de asociaciones rol-permiso: {e}")
-        raise
-
 
 # --- 5. Fixture Principal de Setup (Session Scope) ---
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_database():
     """
     Prepara la BD de prueba para TODA la sesión de tests:
-    1. Aplica migraciones Alembic (schema + roles/permisos base).
-    2. Puebla las asociaciones rol-permiso directamente.
-    3. LIMPIA la BD al final de la sesión. <--- MODIFICADO
+    1. Aplica migraciones Alembic (schema + seeding completo). <-- AHORA HACE TODO
+    2. LIMPIA la BD al final de la sesión.
     """
     print("\n--- [SETUP SESIÓN] Iniciando preparación de BD de prueba ---")
-    # 1. Aplicar Migraciones
+    # 1. Aplicar Migraciones (Ahora incluye schema + seeding completo)
     print("Ejecutando 'alembic upgrade head'...")
     alembic_cfg = alembic.config.Config("alembic.ini")
-    # Asegurarse que alembic use la URL de BD de prueba
     alembic_cfg.set_main_option("sqlalchemy.url", TEST_DATABASE_URL)
     try:
+        # Esto ahora aplica fa15..., cb1b..., y 39f5...
         alembic.command.upgrade(alembic_cfg, "head")
-        print("Migraciones de schema/base aplicadas.")
+        print("Migraciones aplicadas exitosamente (schema + seeding).")
     except Exception as e:
         print(f"\nERROR aplicando migraciones: {e}")
         import traceback
@@ -126,35 +68,17 @@ def setup_test_database():
         pytest.fail(f"Fallo crítico al aplicar migraciones Alembic: {e}")
         return # Detener setup si migraciones fallan
 
-    # 2. Poblar Datos de Asociación Rol-Permiso
-    print("Iniciando seeding de asociaciones rol-permiso...")
-    db = TestingSessionLocal() # Usar una sesión dedicada para el seeding post-migración
-    try:
-        seed_role_permission_links(db) # Llamar a la función auxiliar
-    except Exception as seed_exc: # Capturar excepción específica del seeding
-        # La sesión se cierra en finally
-        print(f"ERROR durante el seeding de asociaciones: {seed_exc}")
-        pytest.fail(f"Fallo durante el seeding de asociaciones rol-permiso: {seed_exc}")
-        return # Salir si el seeding falla
-    finally:
-        db.close() # Asegurar cierre de sesión de seeding
-
-    print("--- [SETUP SESIÓN] Base de datos lista para las pruebas ---")
+    print("--- [SETUP SESIÓN] Base de datos lista para las pruebas (via Alembic). ---")
 
     yield # Aquí se ejecutan todas las pruebas de la sesión
 
-    # --- 3. Limpieza al final de la SESIÓN --- # <<< INICIO BLOQUE MODIFICADO/AÑADIDO
+    # --- 3. Limpieza al final de la SESIÓN (Sin cambios) ---
     print("\n--- [TEARDOWN SESIÓN] Limpiando BD de prueba (drop_all) ---")
     try:
-        # Usar el engine directamente, no una sesión
-        # drop_all elimina todas las tablas conocidas por los metadatos de SQLModel
         SQLModel.metadata.drop_all(bind=engine)
-        print("--- [TEARDOWN SESIÓN] BD limpiada exitosamente (tablas eliminadas). ---")
+        print("--- [TEARDOWN SESIÓN] BD limpiada exitosamente. ---")
     except Exception as drop_exc:
         print(f"ERROR durante drop_all al final de la sesión: {drop_exc}")
-        # No usamos pytest.fail aquí para no ocultar los resultados de las pruebas,
-        # pero sí dejamos un log claro del error.
-    # <<< FIN BLOQUE MODIFICADO/AÑADIDO
 
 # --- 6. Fixture para Sobrescribir Dependencia get_db (sin cambios) ---
 def override_get_db() -> Generator[Session, None, None]:
