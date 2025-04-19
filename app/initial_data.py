@@ -5,7 +5,7 @@ Define los datos iniciales para roles, permisos y sus mapeos.
 Se usa tanto para la migración de seeding como para las fixtures de prueba.
 """
 
-# 1. Roles Iniciales
+
 initial_roles = [
     {'nombre': 'Administrador', 'descripcion': 'Acceso total al sistema.'},
     {'nombre': 'Vendedor', 'descripcion': 'Gestión de ventas y clientes.'},
@@ -14,7 +14,7 @@ initial_roles = [
     {'nombre': 'Operario', 'descripcion': 'Ejecución de tareas de producción.'},
 ]
 
-# 2. Permisos Iniciales (Lista refinada completa)
+
 initial_permissions = [
     # Gestión Acceso y Sistema
     {'nombre_accion': 'gestionar', 'nombre_recurso': 'usuario', 'descripcion': 'CRUD completo de usuarios.'},
@@ -92,7 +92,7 @@ initial_permissions = [
     {'nombre_accion': 'registrar', 'nombre_recurso': 'mi_indisponibilidad', 'descripcion': 'Registrar periodo de indisponibilidad propio.'},
 ]
 
-# 3. Mapeo Rol -> Lista de Permisos (accion:recurso)
+# Lista de Permisos (accion:recurso)
 role_permission_mapping = {
     'Administrador': [
         'gestionar:usuario', 'gestionar:rol', 'gestionar:permiso', 'leer:usuario', 'crear:usuario',

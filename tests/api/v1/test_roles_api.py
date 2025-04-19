@@ -9,9 +9,9 @@ from app.core.config import settings
 # Importar schemas para crear payloads y validar respuestas
 from app.schemas.rol_permiso_schema import RolCreate, RolRead, RolUpdate, RolReadWithPermissions
 # Importar modelo para interactuar con la BD si es necesario verificar
-from app.models import Rol
+from app.models import Rol, Usuario
 from app.repositories import rol_repository, usuario_repository # Para verificaciones directas en BD
-
+import uuid
 # --- Constantes ---
 API_V1_STR = settings.API_V1_STR
 ROLES_ENDPOINT = f"{API_V1_STR}/roles" # Ruta base para roles
@@ -115,9 +115,6 @@ def test_create_role_forbidden_non_admin(vendedor_client: TestClient):
     assert "Permiso insuficiente: Se requiere 'crear:rol'" in response.json()["detail"]
 
 # --- Tests para Obtener Rol por ID (GET /roles/{rol_id}) ---
-
-
-
 def test_get_role_by_id_success(admin_client: TestClient, vendedor_role_id: int):
     """Prueba obtener un rol existente por ID como admin."""
     response = admin_client.get(f"{ROLES_ENDPOINT}/{vendedor_role_id}")
@@ -144,6 +141,69 @@ def test_get_role_forbidden_non_admin(vendedor_client: TestClient, vendedor_role
     assert response.status_code == status.HTTP_403_FORBIDDEN
     assert "Permiso insuficiente: Se requiere 'leer:rol'" in response.json()["detail"]
 
+# --- Tests para Eliminar Roles (DELETE /roles/{rol_id}) ---
+
+def test_delete_role_success_admin(admin_client: TestClient, db_session: Session):
+    """Prueba la eliminación exitosa de un rol NO ASIGNADO como admin."""
+    # 1. Crear un rol temporal que NO esté asignado a nadie
+    role_name_to_delete = f"RolParaBorrar_{uuid.uuid4()}"
+    temp_role_data = RolCreate(nombre=role_name_to_delete, descripcion="Se eliminará")
+    # Usar repositorio para crearlo directamente en la sesión de prueba
+    db_rol = rol_repository.create_rol(db=db_session, rol_in=temp_role_data)
+    role_id_to_delete = db_rol.id
+
+    # 2. Ejecutar la petición DELETE
+    response = admin_client.delete(f"{ROLES_ENDPOINT}/{role_id_to_delete}")
+
+    # 3. Verificar respuesta HTTP (204 No Content para DELETE exitoso)
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+
+    # 4. Verificar en la BD que el rol ya no existe
+    # Forzar commit/refresh para asegurar visibilidad si fuera necesario, aunque get debería funcionar
+    db_session.commit()
+    db_session.expire_all() # Para asegurar que se lee de nuevo de la BD
+    deleted_rol = rol_repository.get_rol(db=db_session, rol_id=role_id_to_delete)
+    assert deleted_rol is None
+
+def test_delete_role_not_found_admin(admin_client: TestClient):
+    """Prueba eliminar un rol con ID inexistente (404)."""
+    non_existent_id = 99998 # Usar otro ID inexistente por si acaso
+    response = admin_client.delete(f"{ROLES_ENDPOINT}/{non_existent_id}")
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert f"Rol con ID {non_existent_id} no encontrado" in response.json()["detail"]
+
+def test_delete_role_conflict_assigned_admin(
+    admin_client: TestClient, db_session: Session, vendedor_role_id: int, vendedor_user: Usuario
+):
+    """Prueba eliminar un rol ASIGNADO a un usuario (409 Conflict)."""
+    # El rol 'Vendedor' (ID de la fixture) está asignado al 'vendedor_user'
+    # Asegurarnos que la asignación existe en esta sesión por si acaso
+    # (Aunque las fixtures de módulo deberían asegurarlo)
+    user_in_db = usuario_repository.get_usuario(db=db_session, user_id=vendedor_user.id)
+    assert user_in_db is not None
+    roles_usuario = {rol.id for rol in user_in_db.roles}
+    assert vendedor_role_id in roles_usuario
+
+    # Intentar eliminar el rol Vendedor
+    response = admin_client.delete(f"{ROLES_ENDPOINT}/{vendedor_role_id}")
+
+    # Verificar respuesta HTTP 409
+    assert response.status_code == status.HTTP_409_CONFLICT
+    data = response.json()
+    assert "detail" in data
+    # El mensaje exacto puede variar según la implementación del repo/servicio
+    assert "No se puede eliminar el rol" in data["detail"]
+    assert "porque está asignado a" in data["detail"]
+
+def test_delete_role_forbidden_non_admin(
+    vendedor_client: TestClient, vendedor_role_id: int # Usamos vendedor_role_id aunque no se debería poder borrar
+):
+    """Prueba que eliminar un rol como no-admin falle (403)."""
+    response = vendedor_client.delete(f"{ROLES_ENDPOINT}/{vendedor_role_id}")
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+    assert "Permiso insuficiente: Se requiere 'eliminar:rol'" in response.json()["detail"]
 
 # --- PRÓXIMOS PASOS ---
 # 1. Implementar el resto de fixtures en conftest.py (si no están ya).
