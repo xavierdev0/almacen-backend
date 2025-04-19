@@ -3,12 +3,14 @@ import logging
 from sqlmodel import Session
 from fastapi import HTTPException, status
 from typing import Optional, Union, List
+import traceback
 
 import re
 
 from app.models.user_models import Usuario, Rol
 from app.schemas.usuario_schema import UsuarioCreate, UsuarioUpdate, UsuarioUpdatePassword
-from app.repositories import usuario_repository, rol_repository 
+from app.repositories import usuario_repository, rol_repository
+from app.services import rol_service  # Importing rol_service
 from app.core.security import get_password_hash, verify_password
 
 
@@ -202,108 +204,61 @@ def update_user_password(
         raise HTTPException(500, "Error interno al actualizar contraseña")
 
 # --- Lectura ---
-def get_user_info(db: Session, user_id: Optional[int]) -> Usuario:
-    """Obtiene usuario por ID/UUID."""
+def get_user_info(db: Session, user_id: int) -> Usuario:
+    """Obtiene usuario por ID."""
     try:
-        user = usuario_repository.get_usuario(db, user_id)
+        user = usuario_repository.get_usuario(db=db, user_id=user_id)
         if not user:
-            logger.warning(f"Usuario {user_id} no encontrado")
-            raise HTTPException(404, "Usuario no encontrado")
+            logger.warning(f"Usuario ID {user_id} no encontrado")
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Usuario no encontrado")
         return user
+    except HTTPException: # Relanzar excepciones HTTP específicas
+        raise
     except Exception as e:
-        logger.error(f"Error obteniendo usuario: {str(e)}")
-        raise HTTPException(500, "Error interno al recuperar usuario")
-    
+        # --- REVERTIDO: Usar logger y HTTP 500 ---
+        logger.error(f"Error inesperado obteniendo usuario ID {user_id}: {e}", exc_info=True)
+        # --- FIN REVERTIDO ---
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Error interno al recuperar usuario")
 
 
 def assign_role_to_user_service(db: Session, *, user_id: int, rol_id: int) -> Usuario:
-    """
-    Asigna un rol existente a un usuario existente.
-
-    Args:
-        db: Sesión de base de datos.
-        user_id: ID del usuario al que se asignará el rol.
-        rol_id: ID del rol a asignar.
-
-    Returns:
-        El objeto Usuario actualizado.
-
-    Raises:
-        HTTPException: 404 si el usuario o el rol no existen,
-                       500 si ocurre un error interno.
-                       (Nota: El repo maneja el caso de asignación ya existente sin error).
-    """
+    """Asigna un rol existente a un usuario existente."""
     logger.info(f"Intentando asignar rol ID={rol_id} a usuario ID={user_id}")
-    # Obtener el usuario (lanza 404 si no existe)
     db_user = get_user_info(db=db, user_id=user_id)
-    # Obtener el rol (lanza 404 si no existe)
-    # Usamos include_permissions=False ya que no necesitamos los permisos del rol aquí
     db_rol = rol_service.get_rol_by_id(db=db, rol_id=rol_id, include_permissions=False)
-
     try:
-        # Llamar a la función del repositorio que maneja la asignación
-        # (incluyendo la verificación de si ya existe)
         updated_user = usuario_repository.assign_rol_to_usuario(
             db=db, db_usuario=db_user, db_rol=db_rol
         )
-        # El repositorio ya hizo commit y refresh
         return updated_user
     except HTTPException:
-        # Relanzar excepciones HTTP específicas del repositorio si las hubiera
         raise
     except Exception as e:
-        # Capturar otros errores inesperados
+        # --- REVERTIDO: Usar logger y HTTP 500 ---
         logger.error(f"Error inesperado asignando rol ID={rol_id} a usuario ID={user_id}: {e}", exc_info=True)
+        db.rollback()
+        # --- FIN REVERTIDO ---
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error interno del servidor al asignar el rol."
         )
-
-
 def remove_role_from_user_service(db: Session, *, user_id: int, rol_id: int) -> Usuario:
-    """
-    Quita un rol previamente asignado de un usuario.
-
-    Args:
-        db: Sesión de base de datos.
-        user_id: ID del usuario del que se quitará el rol.
-        rol_id: ID del rol a quitar.
-
-    Returns:
-        El objeto Usuario actualizado.
-
-    Raises:
-        HTTPException: 404 si el usuario o el rol no existen,
-                       500 si ocurre un error interno.
-                       (Nota: El repo maneja el caso de asignación no existente sin error).
-    """
+    """Quita un rol previamente asignado de un usuario."""
     logger.info(f"Intentando quitar rol ID={rol_id} de usuario ID={user_id}")
-    # Obtener el usuario
     db_user = get_user_info(db=db, user_id=user_id)
-    # Obtener el rol
     db_rol = rol_service.get_rol_by_id(db=db, rol_id=rol_id, include_permissions=False)
-
-    # --- Lógica de Negocio Adicional (Opcional - TODO) ---
-    # Ej: Prevenir quitar el último rol 'Administrador' si es el único admin?
-    # Ej: Prevenir quitarse el rol 'Administrador' a sí mismo?
-    # if db_rol.nombre == "Administrador":
-    #     # Verificar si es el último admin o si se está quitando a sí mismo...
-    #     # logger.warning("Intento de eliminar rol Administrador no permitido bajo ciertas condiciones.")
-    #     # raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Acción no permitida sobre el rol Administrador.")
-    # --- Fin Lógica Adicional ---
-
     try:
-        # Llamar a la función del repositorio que maneja la eliminación
-        # (incluyendo la verificación de si la asignación existe)
         updated_user = usuario_repository.remove_rol_from_usuario(
             db=db, db_usuario=db_user, db_rol=db_rol
         )
-        # El repositorio ya hizo commit y refresh
         return updated_user
     except HTTPException:
         raise
     except Exception as e:
+        # --- REVERTIDO: Usar logger y HTTP 500 ---
         logger.error(f"Error inesperado quitando rol ID={rol_id} de usuario ID={user_id}: {e}", exc_info=True)
+        db.rollback()
+        # --- FIN REVERTIDO ---
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error interno del servidor al quitar el rol."

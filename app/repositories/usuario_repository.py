@@ -88,8 +88,8 @@ def create_usuario(db: Session, usuario_data: Union[Usuario, Dict[str, Any]]) ->
         raise
 
 def update_usuario(
-    db: Session, 
-    *, 
+    db: Session,
+    *,
     db_user: Usuario,
     update_data: Union[UsuarioUpdate, Dict[str, Any]]
 ) -> Usuario:
@@ -99,14 +99,19 @@ def update_usuario(
             update_dict = update_data
         else:
             update_dict = update_data.model_dump(exclude_unset=True)
-        
+
         # Actualización segura excluyendo campos protegidos
-        protected_fields = {"id", "fecha_creacion", "contrasena_hash"}
+        # *** CAMBIO: Eliminar 'contrasena_hash' de los campos protegidos aquí ***
+        protected_fields = {"id", "fecha_creacion"} # <-- 'contrasena_hash' ELIMINADO
         clean_data = {k: v for k, v in update_dict.items() if k not in protected_fields}
-        
+
+        if not clean_data: # Si no hay nada que actualizar (quizás solo se envió un campo protegido)
+             logger.warning(f"Intento de actualizar usuario {db_user.id} sin datos válidos.")
+             return db_user # Devolver sin cambios
+
         # SQLModel 0.0.14+
         db_user.sqlmodel_update(clean_data)
-        
+
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
@@ -116,6 +121,9 @@ def update_usuario(
         db.rollback()
         logger.error(f"Error actualizando usuario {db_user.id}: {str(e)}")
         raise
+
+
+
 
 def delete_usuario(db: Session, user_id: int) -> Optional[Usuario]:
     """Elimina un usuario de forma segura."""
@@ -136,32 +144,22 @@ def delete_usuario(db: Session, user_id: int) -> Optional[Usuario]:
 
 
 def assign_rol_to_usuario(db: Session, *, db_usuario: Usuario, db_rol: Rol) -> Usuario:
-    """
-    Asigna un rol a un usuario creando la entrada en la tabla de enlace UsuarioRol.
-
-    Args:
-        db: La sesión de base de datos.
-        db_usuario: El objeto Usuario al que se le asignará el rol.
-        db_rol: El objeto Rol que será asignado.
-
-    Returns:
-        El objeto Usuario actualizado (potencialmente con la relación 'roles' refrescada).
-
-    Raises:
-        Exception: Si ocurre un error durante la operación de base de datos.
-    """
-
-    # Otra forma de verificar sin cargar la relación completa:
+    # ... (código para verificar si el link ya existe) ...
     link_exists_statement = select(UsuarioRol).where(
         UsuarioRol.usuario_id == db_usuario.id,
         UsuarioRol.rol_id == db_rol.id
     )
     existing_link = db.exec(link_exists_statement).first()
-
     if existing_link:
         logger.debug(f"Rol ID {db_rol.id} ya asignado a usuario ID {db_usuario.id}.")
-        # Devolver el usuario sin cambios o refrescado si se prefiere
-        # db.refresh(db_usuario) # Opcional
+        # --- CAMBIO: Recargar roles incluso si ya existía, para asegurar estado fresco ---
+        try:
+            db.refresh(db_usuario, attribute_names=["roles"]) # Recargar solo roles
+            logger.debug(f"Refrescada relación roles para usuario ID {db_usuario.id} (asignación ya existía).")
+        except Exception as refresh_err:
+             # Loggear error de refresh pero continuar, puede que no sea crítico aquí
+             logger.warning(f"Error al refrescar roles para usuario {db_usuario.id} (asignación ya existía): {refresh_err}")
+        # --- FIN CAMBIO ---
         return db_usuario
 
     logger.info(f"Asignando rol ID {db_rol.id} ({db_rol.nombre}) a usuario ID {db_usuario.id} ({db_usuario.username})")
@@ -169,11 +167,11 @@ def assign_rol_to_usuario(db: Session, *, db_usuario: Usuario, db_rol: Rol) -> U
     try:
         db.add(db_usuario_rol)
         db.commit()
-        # Refrescar el usuario puede ser necesario para que la colección usuario.roles
-        # refleje inmediatamente el nuevo rol añadido, dependiendo de la configuración
-        # de la sesión y la estrategia de carga de relaciones.
-        db.refresh(db_usuario)
-        logger.info(f"Rol asignado correctamente.")
+        # --- CAMBIO: Refrescar explícitamente la relación 'roles' ---
+        # db.refresh(db_usuario) # Refrescar solo atributos escalares no es suficiente
+        db.refresh(db_usuario, attribute_names=["roles"]) # Recargar específicamente la relación
+        logger.info(f"Rol asignado y relación 'roles' refrescada para usuario ID {db_usuario.id}.")
+        # --- FIN CAMBIO ---
         return db_usuario
     except Exception as e:
         db.rollback()
@@ -181,16 +179,11 @@ def assign_rol_to_usuario(db: Session, *, db_usuario: Usuario, db_rol: Rol) -> U
             f"Error asignando rol ID {db_rol.id} a usuario ID {db_usuario.id}: {e}",
             exc_info=True
         )
-        raise # Relanzar la excepción para que la capa de servicio la maneje
+        raise # Relanzar la excepción
 
-
-# NUEVA FUNCIÓN para quitar rol
+# Modificar remove_rol_from_usuario
 def remove_rol_from_usuario(db: Session, *, db_usuario: Usuario, db_rol: Rol) -> Usuario:
-    """
-    Quita un rol a un usuario eliminando la entrada en la tabla UsuarioRol.
-    Verifica si la asignación existe antes de intentar eliminarla.
-    """
-    # Buscar la entrada específica en la tabla de enlace
+    # ... (código para buscar link_to_delete) ...
     link_statement = select(UsuarioRol).where(
         UsuarioRol.usuario_id == db_usuario.id,
         UsuarioRol.rol_id == db_rol.id
@@ -198,21 +191,25 @@ def remove_rol_from_usuario(db: Session, *, db_usuario: Usuario, db_rol: Rol) ->
     link_to_delete = db.exec(link_statement).first()
 
     if not link_to_delete:
-        logger.warning(f"Intento de quitar rol ID={db_rol.id} ('{db_rol.nombre}') de usuario ID={db_usuario.id} ('{db_usuario.username}'), pero la asignación no existe.")
-        # Devolver el usuario sin cambios. No necesariamente un error 404 a nivel de repo.
-        # El servicio decidirá si esto es un 404.
+        logger.warning(f"Intento de quitar rol ID={db_rol.id} ... pero la asignación no existe.")
+         # --- CAMBIO: Recargar roles incluso si no existía, para asegurar estado fresco ---
+        try:
+            db.refresh(db_usuario, attribute_names=["roles"]) # Recargar solo roles
+            logger.debug(f"Refrescada relación roles para usuario ID {db_usuario.id} (asignación no existía).")
+        except Exception as refresh_err:
+             logger.warning(f"Error al refrescar roles para usuario {db_usuario.id} (asignación no existía): {refresh_err}")
+        # --- FIN CAMBIO ---
         return db_usuario
 
-    # Si existe, eliminar la asociación
     logger.info(f"Quitando rol ID={db_rol.id} ('{db_rol.nombre}') de usuario ID={db_usuario.id} ('{db_usuario.username}')")
     try:
         db.delete(link_to_delete)
         db.commit()
-        # Refrescar el usuario para reflejar el cambio en la relación roles
-        db.refresh(db_usuario)
-        # Cargar explícitamente si es necesario
-        # db.refresh(db_usuario, attribute_names=["roles"])
-        logger.info(f"Rol quitado correctamente.")
+         # --- CAMBIO: Refrescar explícitamente la relación 'roles' ---
+        # db.refresh(db_usuario) # Refrescar solo atributos escalares no es suficiente
+        db.refresh(db_usuario, attribute_names=["roles"]) # Recargar específicamente la relación
+        logger.info(f"Rol quitado y relación 'roles' refrescada para usuario ID {db_usuario.id}.")
+         # --- FIN CAMBIO ---
         return db_usuario
     except Exception as e:
         db.rollback()
@@ -220,8 +217,10 @@ def remove_rol_from_usuario(db: Session, *, db_usuario: Usuario, db_rol: Rol) ->
             f"Error quitando rol ID={db_rol.id} de usuario ID={db_usuario.id}: {e}",
             exc_info=True
         )
-        # Relanzar para que el servicio lo maneje
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error interno al quitar el rol al usuario."
-        )
+        # --- CAMBIO AQUÍ: Mantener el raise original (NO HTTP 500 desde repo) ---
+        raise
+        # --- FIN CAMBIO ---
+        # raise HTTPException(
+        #     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        #     detail="Error interno al quitar el rol al usuario."
+        # )
