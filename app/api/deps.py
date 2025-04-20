@@ -124,39 +124,6 @@ def get_current_active_user(
 
 
 
-ADMIN_ROLE_NAME = "Administrador" 
-def require_admin_role(
-    current_user: Annotated[Usuario, Depends(get_current_active_user)]
-):
-    """
-    Dependencia placeholder que verifica si el usuario activo tiene el rol 'Administrador'.
-    NOTA: Esto debería reemplazarse más adelante con una verificación basada en permisos.
-    Asume que current_user (de get_current_active_user -> get_current_user)
-    ya tiene la relación 'roles' cargada.
-
-    Args:
-        current_user: El usuario activo obtenido de get_current_active_user.
-
-    Raises:
-        HTTPException 403: Si el usuario no tiene el rol de Administrador.
-                           O si el usuario no tiene roles asignados.
-    """
-    if not current_user.roles:
-         logger.warning(f"Usuario ID {current_user.id} ('{current_user.username}') no tiene roles asignados al verificar acceso admin.")
-         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acción no permitida. Roles no definidos para el usuario."
-        )
-
-    has_admin_role = any(role.nombre == ADMIN_ROLE_NAME for role in current_user.roles)
-
-    if not has_admin_role:
-        logger.warning(f"Intento de acceso admin no autorizado por Usuario ID: {current_user.id} ('{current_user.username}'). Roles: {[r.nombre for r in current_user.roles]}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Se requiere rol de Administrador para realizar esta acción."
-        )
-    logger.debug(f"Acceso admin permitido para Usuario ID: {current_user.id} ('{current_user.username}')")
 
 def require_permission(required_permission: str) -> Callable:
     """

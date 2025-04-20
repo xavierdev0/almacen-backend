@@ -12,48 +12,23 @@ from app.schemas.rol_permiso_schema import PermisoCreate, PermisoUpdate
 
 logger = logging.getLogger(__name__)
 
-def create_new_permiso(db: Session, *, permiso_in: PermisoCreate) -> Permiso:
-    """
-    Crea un nuevo permiso, validando duplicados a través del repositorio.
-
-    Args:
-        db: Sesión de base de datos.
-        permiso_in: Datos del permiso a crear.
-
-    Returns:
-        El objeto Permiso creado.
-
-    Raises:
-        HTTPException: Si el permiso ya existe (409) o error interno (500).
-    """
-    logger.info(f"Intentando crear permiso: {permiso_in.nombre_accion}:{permiso_in.nombre_recurso}")
-    # La validación de duplicado (IntegrityError -> HTTPException 409)
-    # ya se maneja en permiso_repository.create_permiso
-    try:
-        permiso = permiso_repository.create_permiso(db=db, permiso_in=permiso_in)
-        return permiso
-    except HTTPException: # Relanzar excepciones HTTP (ej: 409 del repo)
-         raise
-    except Exception as e:
-        logger.error(f"Error inesperado al crear permiso: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error interno del servidor al crear el permiso."
-        )
+# =====================
+#  Funciones Read (Getters)
+# =====================
 
 def get_permiso_by_id(db: Session, *, permiso_id: int) -> Permiso:
     """
-    Obtiene un permiso por su ID.
+    Obtiene un permiso específico por su ID, delegando al repositorio.
 
     Args:
-        db: Sesión de base de datos.
+        db: Sesión de base de datos activa.
         permiso_id: ID del permiso a buscar.
 
     Returns:
         El objeto Permiso encontrado.
 
     Raises:
-        HTTPException: Si el permiso no se encuentra (404).
+        HTTPException: 404 si el permiso con el ID especificado no se encuentra.
     """
     logger.debug(f"Buscando permiso con ID: {permiso_id}")
     permiso = permiso_repository.get_permiso(db=db, permiso_id=permiso_id)
@@ -69,15 +44,18 @@ def get_all_permisos(
     db: Session, *, skip: int = 0, limit: int = 100
 ) -> Sequence[Permiso]:
     """
-    Obtiene una lista paginada de todos los permisos.
+    Obtiene una lista paginada de todos los permisos, delegando al repositorio.
 
     Args:
-        db: Sesión de base de datos.
-        skip: Número de registros a saltar.
-        limit: Número máximo de registros a devolver.
+        db: Sesión de base de datos activa.
+        skip: Número de registros a saltar (para paginación).
+        limit: Número máximo de registros a devolver (para paginación).
 
     Returns:
-        Una secuencia de objetos Permiso.
+        Una secuencia (lista) de objetos Permiso.
+
+    Raises:
+        HTTPException: 500 si ocurre un error interno inesperado al listar.
     """
     logger.debug(f"Listando permisos con skip={skip}, limit={limit}")
     try:
@@ -90,33 +68,77 @@ def get_all_permisos(
              detail="Error interno del servidor al listar permisos."
          )
 
+# =====================
+#  Funciones Write (Create, Update, Delete)
+# =====================
+
+def create_new_permiso(db: Session, *, permiso_in: PermisoCreate) -> Permiso:
+    """
+    Crea un nuevo permiso, delegando la creación y validación de duplicados al repositorio.
+
+    Args:
+        db: Sesión de base de datos activa.
+        permiso_in: Datos del permiso a crear (esquema PermisoCreate).
+
+    Returns:
+        El objeto Permiso creado.
+
+    Raises:
+        HTTPException: 409 si el permiso ya existe (manejo de IntegrityError del repo).
+        HTTPException: 500 si ocurre un error interno inesperado.
+    """
+    logger.info(f"Intentando crear permiso: {permiso_in.nombre_accion}:{permiso_in.nombre_recurso}")
+    # La validación de duplicado (IntegrityError -> HTTPException 409)
+    # ya se maneja en permiso_repository.create_permiso
+    try:
+        permiso = permiso_repository.create_permiso(db=db, permiso_in=permiso_in)
+        return permiso
+    except HTTPException: # Re-lanzar excepciones HTTP (ej: 409 del repo)
+        raise
+    except Exception as e:
+        logger.error(f"Error inesperado al crear permiso: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno del servidor al crear el permiso."
+        )
+
 def update_existing_permiso(
     db: Session, *, permiso_id: int, permiso_in: PermisoUpdate
 ) -> Permiso:
     """
     Actualiza un permiso existente.
 
+    Primero obtiene el permiso, luego verifica si la combinación acción/recurso
+    está cambiando y si la nueva combinación ya existe en otro permiso.
+    Finalmente, delega la actualización al repositorio.
+
     Args:
-        db: Sesión de base de datos.
+        db: Sesión de base de datos activa.
         permiso_id: ID del permiso a actualizar.
-        permiso_in: Datos con los campos a actualizar.
+        permiso_in: Datos con los campos a actualizar (esquema PermisoUpdate).
 
     Returns:
         El objeto Permiso actualizado.
 
     Raises:
-        HTTPException: Si no se encuentra (404), hay conflicto (409) o error interno (500).
+        HTTPException: 404 si el permiso original no se encuentra.
+        HTTPException: 409 si la nueva combinación acción/recurso ya existe en otro permiso.
+        HTTPException: 409 si el repositorio detecta un conflicto al guardar (IntegrityError).
+        HTTPException: 500 si ocurre un error interno inesperado.
     """
     logger.info(f"Intentando actualizar permiso ID: {permiso_id}")
-    db_permiso = get_permiso_by_id(db=db, permiso_id=permiso_id) # Reutiliza la función (maneja 404)
+    # Obtener el permiso existente; esto maneja el caso 404 si no se encuentra.
+    db_permiso = get_permiso_by_id(db=db, permiso_id=permiso_id)
 
     update_data = permiso_in.model_dump(exclude_unset=True)
 
-    # Verificar si la combinación acción/recurso está cambiando y si ya existe
+    # Verificar conflicto de combinación acción/recurso si está cambiando
     new_action = update_data.get("nombre_accion")
     new_resource = update_data.get("nombre_recurso")
-    # Si al menos uno de los dos cambia
+
+    # Solo realizar la verificación si se intenta cambiar la acción o el recurso
     if new_action is not None or new_resource is not None:
+        # Determinar la combinación final a verificar
         check_action = new_action if new_action is not None else db_permiso.nombre_accion
         check_resource = new_resource if new_resource is not None else db_permiso.nombre_recurso
 
@@ -126,6 +148,7 @@ def update_existing_permiso(
             existing = permiso_repository.get_permiso_by_accion_recurso(
                 db=db, nombre_accion=check_action, nombre_recurso=check_resource
             )
+            # Si existe otro permiso diferente con esa combinación, hay conflicto
             if existing and existing.id != permiso_id:
                 logger.warning(f"Conflicto al actualizar permiso ID {permiso_id}: "
                                f"La combinación {check_action}:{check_resource} ya existe (ID: {existing.id}).")
@@ -134,14 +157,14 @@ def update_existing_permiso(
                     detail=f"El permiso '{check_action}:{check_resource}' ya existe."
                 )
 
-    # La validación de duplicado/conflicto también se maneja en el repo al hacer commit
+    # La validación final de duplicado/conflicto también ocurre en el repo al hacer commit.
     try:
         updated_permiso = permiso_repository.update_permiso(
             db=db, db_permiso=db_permiso, permiso_in=update_data
         )
         return updated_permiso
-    except HTTPException: # Relanzar 409 del repo
-         raise
+    except HTTPException: # Re-lanzar 409 del repo
+        raise
     except Exception as e:
         logger.error(f"Error inesperado al actualizar permiso ID {permiso_id}: {e}", exc_info=True)
         raise HTTPException(
@@ -151,28 +174,34 @@ def update_existing_permiso(
 
 def delete_existing_permiso(db: Session, *, permiso_id: int) -> Permiso:
     """
-    Elimina un permiso existente.
+    Elimina un permiso existente, delegando al repositorio.
+
+    Primero verifica que el permiso exista. Luego llama al repositorio para
+    eliminarlo, confiando en la lógica del repositorio (y la DB) para manejar
+    las dependencias (como ON DELETE CASCADE).
 
     Args:
-        db: Sesión de base de datos.
+        db: Sesión de base de datos activa.
         permiso_id: ID del permiso a eliminar.
 
     Returns:
-        El objeto Permiso eliminado.
+        El objeto Permiso que fue eliminado.
 
     Raises:
-        HTTPException: Si no se encuentra (404) o error interno (500).
+        HTTPException: 404 si el permiso no se encuentra.
+        HTTPException: 500 si ocurre un error interno inesperado durante la eliminación.
     """
     logger.info(f"Intentando eliminar permiso ID: {permiso_id}")
-    db_permiso = get_permiso_by_id(db=db, permiso_id=permiso_id) # Reutiliza la función (maneja 404)
+    # Obtener el permiso; esto maneja el caso 404 si no se encuentra.
+    db_permiso = get_permiso_by_id(db=db, permiso_id=permiso_id)
 
     try:
+        # Delegar la eliminación al repositorio
         deleted_permiso = permiso_repository.delete_permiso(db=db, db_permiso=db_permiso)
-        # Aquí podríamos añadir lógica si delete_permiso devuelve None en caso de fallo por FK
         return deleted_permiso
     except Exception as e:
+        # Capturar cualquier excepción durante la eliminación en el repositorio
         logger.error(f"Error inesperado al eliminar permiso ID {permiso_id}: {e}", exc_info=True)
-        # Podríamos verificar si 'e' es por restricción de FK
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error interno al eliminar el permiso ID {permiso_id}."
