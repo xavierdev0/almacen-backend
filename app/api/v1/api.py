@@ -1,7 +1,7 @@
 # app/api/v1/api.py
 from fastapi import APIRouter
 # Importar los routers existentes y los nuevos
-from app.api.v1.endpoints import auth, usuarios, roles, permisos # <--- Añadidos roles, permisos
+from app.api.v1.endpoints import auth, usuarios, roles, permisos, clientes
 
 api_router_v1 = APIRouter()
 
@@ -20,6 +20,11 @@ api_router_v1.include_router(
     }
 )
 
+
+# --- Clientes --- # <--- 2. AÑADIR ESTA SECCIÓN
+api_router_v1.include_router(
+    clientes.router 
+)
 
 # --- Roles (Admin) ---
 # Incluimos el router definido en endpoints/roles.py

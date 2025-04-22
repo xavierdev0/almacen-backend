@@ -5,12 +5,17 @@ from typing import Generator, Dict, List, Callable
 import pytest
 from fastapi import FastAPI # Necesario indirectamente para TestClient(app)
 from fastapi.testclient import TestClient
+from fastapi import status
 from sqlmodel import SQLModel, Session, create_engine, select
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 import alembic.config
 import alembic.command
 import sqlalchemy as sa # Necesario para sa.delete
+import uuid
+from app.core.config import settings
+
+CLIENTES_ENDPOINT = f"{settings.API_V1_STR}/clientes"
 
 # ==================================
 #  1. Carga de Configuración de Prueba
@@ -32,10 +37,13 @@ from app.core.config import settings
 from app.main import app # Importar la instancia de la aplicación FastAPI
 from app.core.database import get_db # Importar la dependencia original de DB
 # Importar todos los modelos que puedan ser usados en tests o seeding
-from app.models import Usuario, Rol, Permiso, UsuarioRol, RolPermiso
+from app.models import Usuario, Rol, Permiso, UsuarioRol, RolPermiso, Cliente
 # Importar servicios/repositorios usados por fixtures o tests
 from app.services import usuario_service
+
 from app.schemas.usuario_schema import UsuarioCreate
+from app.schemas.client_schema import ClienteCreate  
+
 # Importar initial_data aunque no se use directamente, las migraciones de Alembic dependen de él.
 from app.initial_data import initial_roles, initial_permissions, role_permission_mapping
 # Importar repositorios necesarios
@@ -246,6 +254,28 @@ def vendedor_client(vendedor_token: str) -> Generator[TestClient, None, None]:
         yield client
     print(f"DEBUG [conftest - vendedor_client teardown]: Destruido cliente INDEPENDIENTE ID={id(client)}.")
 
+# --- Fixture Auxiliar (Opcional pero Recomendada) ---
+@pytest.fixture(scope="function")
+def cliente_de_prueba(vendedor_client: TestClient, db_session: Session) -> Cliente:
+    """Fixture para crear un cliente de prueba antes de un test."""
+    unique_suffix = uuid.uuid4().hex[:6]
+    cliente_data = ClienteCreate(
+        nombre=f"Cliente Prueba {unique_suffix}",
+        email=f"cliente_{unique_suffix}@pruebas.com",
+        identificacion_fiscal=f"999{unique_suffix}",
+        tipo_identificacion="RUC",
+        telefono="0987654321"
+    )
+    response = vendedor_client.post(CLIENTES_ENDPOINT, json=cliente_data.model_dump())
+    assert response.status_code == status.HTTP_201_CREATED
+    cliente_id = response.json()["id"]
+    # Obtener el objeto completo desde la BD para devolverlo
+    # Usamos una consulta directa para asegurar que leemos lo que se acaba de escribir
+    cliente_db = db_session.get(Cliente, cliente_id)
+    #cliente_db = cliente_repository.get_cliente_by_id(db=db_session, cliente_id=cliente_id)
+    assert cliente_db is not None
+    print(f"Cliente de prueba creado por fixture: ID={cliente_db.id}")
+    return cliente_db
 
 # ============================
 #  8. Fixtures de Datos (Roles y Permisos)

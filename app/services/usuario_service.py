@@ -55,7 +55,7 @@ def create_new_user(db: Session, user_in: UsuarioCreate) -> Usuario:
             logger.warning(f"Username ya registrado: '{username}'")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El nombre de usuario no está disponible.")
 
-        # --- Validación de Roles (NUEVO) ---
+        # --- Validación de Roles ---
         roles_to_assign: List[Rol] = [] # Lista para guardar objetos Rol validados
         if user_in.rol_ids:
             # Eliminar duplicados y ordenar para consistencia
@@ -81,7 +81,6 @@ def create_new_user(db: Session, user_in: UsuarioCreate) -> Usuario:
                  logger.warning(f"Lista de 'rol_ids' proporcionada para usuario '{username}' estaba vacía o contenía solo duplicados.")
         else:
              logger.warning(f"No se proporcionaron 'rol_ids' para el nuevo usuario '{username}'. Se creará sin roles iniciales.")
-             # Ya no se asigna el rol 'Vendedor' por defecto
 
         # --- Creación del Usuario (Preparación) ---
         hashed_password = get_password_hash(user_in.password)
@@ -128,9 +127,7 @@ def create_new_user(db: Session, user_in: UsuarioCreate) -> Usuario:
             # Cargar explícitamente roles si es necesario devolverlos inmediatamente (opcional)
             # db.refresh(created_user, attribute_names=["roles"])
 
-        # --- Lógica de Asignación de Rol por Defecto ELIMINADA ---
-
-        return created_user # Devolver el usuario creado
+        return created_user 
 
     except HTTPException as http_exc:
         raise http_exc
