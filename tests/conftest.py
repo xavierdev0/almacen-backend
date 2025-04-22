@@ -1,4 +1,5 @@
 # app/tests/conftest.py
+from decimal import Decimal
 import os
 from typing import Generator, Dict, List, Callable
 
@@ -16,6 +17,12 @@ import uuid
 from app.core.config import settings
 
 CLIENTES_ENDPOINT = f"{settings.API_V1_STR}/clientes"
+API_V1_STR = settings.API_V1_STR
+INVENTARIO_ENDPOINT = f"{API_V1_STR}/inventario"
+MAT_DIM_ENDPOINT = f"{INVENTARIO_ENDPOINT}/materiales-dimensionales"
+MAT_CONS_ENDPOINT = f"{INVENTARIO_ENDPOINT}/materiales-consumibles"
+MAT_SIMP_ENDPOINT = f"{INVENTARIO_ENDPOINT}/materiales-simples"
+STOCK_ITEM_DIM_ENDPOINT = f"{INVENTARIO_ENDPOINT}/stock-items-dimensionales"
 
 # ==================================
 #  1. Carga de Configuración de Prueba
@@ -42,7 +49,9 @@ from app.models import Usuario, Rol, Permiso, UsuarioRol, RolPermiso, Cliente
 from app.services import usuario_service
 
 from app.schemas.usuario_schema import UsuarioCreate
-from app.schemas.client_schema import ClienteCreate  
+from app.schemas.client_schema import ClienteCreate
+from app.models.inventory_models import MaterialConsumible, MaterialDimensional, MaterialSimple, StockItemDimensional  # Import the missing model
+from app.schemas.inventory_schema import MaterialConsumibleCreate, MaterialDimensionalCreate, MaterialSimpleCreate, StockItemDimensionalCreate  # Import the missing schema
 
 # Importar initial_data aunque no se use directamente, las migraciones de Alembic dependen de él.
 from app.initial_data import initial_roles, initial_permissions, role_permission_mapping
@@ -254,7 +263,7 @@ def vendedor_client(vendedor_token: str) -> Generator[TestClient, None, None]:
         yield client
     print(f"DEBUG [conftest - vendedor_client teardown]: Destruido cliente INDEPENDIENTE ID={id(client)}.")
 
-# --- Fixture Auxiliar (Opcional pero Recomendada) ---
+          
 @pytest.fixture(scope="function")
 def cliente_de_prueba(vendedor_client: TestClient, db_session: Session) -> Cliente:
     """Fixture para crear un cliente de prueba antes de un test."""
@@ -506,6 +515,120 @@ def vendedor_user(test_user_factory: Callable) -> Usuario:
     return test_user_factory(username="testvendedor", email="vendedor@test.com", password="password123", roles_names=["Vendedor"])
 
 
+# --- Fixtures para Tipos de Material ---
+@pytest.fixture(scope="function")
+def material_dimensional_de_prueba(admin_client: TestClient, db_session: Session) -> MaterialDimensional:
+    """Fixture para crear un tipo de MaterialDimensional vía API."""
+    unique_suffix = uuid.uuid4().hex[:6]
+    payload_schema = MaterialDimensionalCreate(
+        sku=f"FIX-DIM-{unique_suffix}",
+        nombre=f"Plancha Fixture {unique_suffix}",
+        espesor_nominal=Decimal("15.0"),
+        unidad_dimension="mm"
+    )
+    payload_dict = payload_schema.model_dump(mode='json') # Correcto
+
+    response = admin_client.post(MAT_DIM_ENDPOINT, json=payload_dict) # Usa el dict serializado
+    assert response.status_code == status.HTTP_201_CREATED, f"Fallo al crear MaterialDimensional en fixture: {response.text}"
+    data = response.json()
+    mat_id = data["id"]
+
+    # Usar la sesión original para cerrar (como buena práctica) y luego verificar con una nueva
+    db_session.close()
+    with TestingSessionLocal() as verification_db:
+        db_obj = verification_db.get(MaterialDimensional, mat_id)
+
+    assert db_obj is not None, "No se pudo recuperar MaterialDimensional de BD en fixture (nueva sesión)"
+    print(f"Fixture: MaterialDimensional creado: ID={db_obj.id}, SKU={db_obj.sku}")
+    return db_obj # Devolver el objeto recuperado de la nueva sesión
+
+
+@pytest.fixture(scope="function")
+def material_consumible_de_prueba(admin_client: TestClient, db_session: Session) -> MaterialConsumible:
+    """Fixture para crear un tipo de MaterialConsumible vía API."""
+    unique_suffix = uuid.uuid4().hex[:6]
+    payload_schema = MaterialConsumibleCreate(
+        sku=f"FIX-CONS-{unique_suffix}",
+        nombre=f"Lija Fixture {unique_suffix}",
+        unidad_medida="pliego",
+        stock_minimo=Decimal("10.0")
+    )
+    payload_dict = payload_schema.model_dump(mode='json') # Correcto
+
+    response = admin_client.post(MAT_CONS_ENDPOINT, json=payload_dict)
+    assert response.status_code == status.HTTP_201_CREATED, f"Fallo al crear MaterialConsumible en fixture: {response.text}"
+    data = response.json()
+    mat_id = data["id"]
+
+    db_session.close()
+    with TestingSessionLocal() as verification_db:
+        db_obj = verification_db.get(MaterialConsumible, mat_id)
+
+    assert db_obj is not None, "No se pudo recuperar MaterialConsumible de BD en fixture (nueva sesión)"
+    print(f"Fixture: MaterialConsumible creado: ID={db_obj.id}, SKU={db_obj.sku}")
+    return db_obj
+
+
+@pytest.fixture(scope="function")
+def material_simple_de_prueba(admin_client: TestClient, db_session: Session) -> MaterialSimple:
+    """Fixture para crear un tipo de MaterialSimple vía API."""
+    unique_suffix = uuid.uuid4().hex[:6]
+    payload_schema = MaterialSimpleCreate(
+        sku=f"FIX-SIMP-{unique_suffix}",
+        nombre=f"Tornillo Fixture {unique_suffix}",
+        unidad_medida="ciento",
+        stock_minimo=Decimal("2.0")
+    )
+    payload_dict = payload_schema.model_dump(mode='json') # Correcto
+
+    response = admin_client.post(MAT_SIMP_ENDPOINT, json=payload_dict)
+    assert response.status_code == status.HTTP_201_CREATED, f"Fallo al crear MaterialSimple en fixture: {response.text}"
+    data = response.json()
+    mat_id = data["id"]
+
+    db_session.close()
+    with TestingSessionLocal() as verification_db:
+        db_obj = verification_db.get(MaterialSimple, mat_id)
+
+    assert db_obj is not None, "No se pudo recuperar MaterialSimple de BD en fixture (nueva sesión)"
+    print(f"Fixture: MaterialSimple creado: ID={db_obj.id}, SKU={db_obj.sku}")
+    return db_obj
+
+# --- Fixture para Item de Stock Dimensional ---
+
+@pytest.fixture(scope="function")
+def stock_item_dimensional_de_prueba(
+    admin_client: TestClient,
+    db_session: Session,
+    material_dimensional_de_prueba: MaterialDimensional
+) -> StockItemDimensional:
+    """Fixture para crear una pieza de StockItemDimensional vía API."""
+    unique_suffix = uuid.uuid4().hex[:6]
+    # Asegurarse que material_dimensional_de_prueba.id es válido
+    assert material_dimensional_de_prueba.id is not None, "Fixture material_dimensional_de_prueba no tiene ID"
+
+    payload_schema = StockItemDimensionalCreate(
+        material_dimensional_id=material_dimensional_de_prueba.id,
+        longitud_actual=Decimal("2440.000"),
+        ancho_actual=Decimal("1220.000"),
+        ubicacion=f"TEST-{unique_suffix}"
+    )
+    payload_dict = payload_schema.model_dump(mode='json') # <<< CORRECCIÓN: nombre variable y mode='json'
+
+    response = admin_client.post(STOCK_ITEM_DIM_ENDPOINT, json=payload_dict)
+    assert response.status_code == status.HTTP_201_CREATED, f"Fallo al crear StockItemDimensional en fixture: {response.text}"
+    data = response.json()
+    item_id = data["id"]
+
+    # Verificar con nueva sesión para asegurar visibilidad
+    db_session.close()
+    with TestingSessionLocal() as verification_db:
+        db_obj = verification_db.get(StockItemDimensional, item_id)
+
+    assert db_obj is not None, "No se pudo recuperar StockItemDimensional de BD en fixture (nueva sesión)" # <<< CORRECCIÓN: assert sobre el objeto de la nueva sesión
+    print(f"Fixture: StockItemDimensional creado: ID={db_obj.id} para MaterialID={db_obj.material_dimensional_id}")
+    return db_obj
+
 # ============================
 #  11. Fixtures de Tokens de Autenticación
 # ============================
@@ -569,3 +692,30 @@ def vendedor_token(get_auth_token: Callable, vendedor_user: Usuario) -> str:
     token = get_auth_token(username=vendedor_user.username, password="password123")
     print(f"DEBUG [conftest]: vendedor_token obtenido: ...{token[-6:]}")
     return token
+
+@pytest.fixture(scope="module")
+def operario_user(test_user_factory: Callable) -> Usuario:
+    """Fixture (scope='module') que crea/obtiene el usuario 'testoperario'."""
+    return test_user_factory(username="testoperario", email="operario@test.com", password="password123", roles_names=["Operario"])
+
+@pytest.fixture(scope="module")
+def operario_token(get_auth_token: Callable, operario_user: Usuario) -> str:
+    """Fixture (scope='module') que obtiene y devuelve el token para 'testoperario'."""
+    print("DEBUG [conftest]: Obteniendo operario_token (module scope)...")
+    assert operario_user and operario_user.username, "Fixture operario_user no disponible o sin username"
+    token = get_auth_token(username=operario_user.username, password="password123")
+    print(f"DEBUG [conftest]: operario_token obtenido: ...{token[-6:]}")
+    return token
+
+@pytest.fixture(scope="function")
+def operario_client(operario_token: str) -> Generator[TestClient, None, None]:
+    """
+    Fixture (scope='function') que proporciona un cliente de prueba INDEPENDIENTE
+    autenticado como Operario.
+    """
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as client:
+        client.headers["Authorization"] = f"Bearer {operario_token}"
+        print(f"DEBUG [conftest - operario_client setup]: Creado cliente INDEPENDIENTE ID={id(client)} con token Operario ...{operario_token[-6:]}")
+        yield client
+    print(f"DEBUG [conftest - operario_client teardown]: Destruido cliente INDEPENDIENTE ID={id(client)}.")
