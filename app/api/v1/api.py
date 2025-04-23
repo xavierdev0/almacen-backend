@@ -1,7 +1,7 @@
 # app/api/v1/api.py
 from fastapi import APIRouter
 # Importar los routers existentes y los nuevos
-from app.api.v1.endpoints import auth, usuarios, roles, permisos, clientes, inventario
+from app.api.v1.endpoints import auth, usuarios, roles, permisos, clientes, inventario, service
 
 api_router_v1 = APIRouter()
 
@@ -32,16 +32,18 @@ api_router_v1.include_router(
     roles.router,
 )
 
+
+# --- Servicios --- # <--- 
+api_router_v1.include_router(
+    service.router # Incluir el router que definimos en servicios.py
+)
+
+
+
 # --- Permisos (Admin) ---
 # Incluimos el router definido en endpoints/permisos.py
 api_router_v1.include_router(
-    permisos.router,
-    responses={ # Respuestas comunes para este grupo
-        403: {"description": "Acceso restringido (Requiere rol Admin por ahora)"},
-        404: {"description": "Permiso no encontrado"},
-        409: {"description": "Conflicto de datos (ej: acción/recurso duplicado)"}
-    }
-
+    permisos.router
 )
 
 api_router_v1.include_router(

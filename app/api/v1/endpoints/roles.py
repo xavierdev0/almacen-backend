@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Todas las rutas en este archivo requerirán el rol de admin
 router = APIRouter(
     prefix="/roles",
-    tags=["Roles y Permisos"],
+    tags=["Roles"],
 )
 
 @router.post(

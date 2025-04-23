@@ -163,7 +163,7 @@ def require_permission(required_permission: str) -> Callable:
                 else:
                     print(f"--- ERROR CRÍTICO: La relación 'permisos' NO está cargada o es None para el Rol ID={role.id} ('{role.nombre}') del usuario ID={current_user.id}.") # <-- PRINT (era error)
 
-        print(f"--- DEBUG Set final de permisos agregados: {user_permissions}") 
+        #print(f"--- DEBUG Set final de permisos agregados: {user_permissions}") 
 
 
         if required_permission not in user_permissions:
