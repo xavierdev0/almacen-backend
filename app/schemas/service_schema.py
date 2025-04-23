@@ -5,8 +5,18 @@ from typing import Optional
 from datetime import datetime
 from decimal import Decimal
 
+
 class ServicioDefinicionBase(SQLModel):
     """Schema base para la definición de servicios."""
+    # --- CAMBIO: Añadido campo codigo ---
+    codigo: str = Field(
+        ...,
+        max_length=50,
+        index=True, # Info para dev
+        unique=True, # Info para dev
+        description="Código único para identificar el servicio."
+    )
+    # --- FIN CAMBIO ---
     nombre: str = Field(
         ...,
         max_length=255,
@@ -16,7 +26,7 @@ class ServicioDefinicionBase(SQLModel):
         default=None,
         description="Descripción detallada del servicio."
     )
-    unidad_medida: str = Field(
+    unidad_cobro: str = Field(
         ...,
         max_length=50,
         description="Unidad en la que se mide/cobra el servicio (ej: pieza, hora, m2, corte, ml)."
@@ -45,11 +55,18 @@ class ServicioDefinicionBase(SQLModel):
         default=Decimal("1.0"),
         description="Factor de Imprevistos/Herramientas (multiplicador sobre costo base, ej: 1.1 para 10%)."
     )
+    # --- CAMBIO: Añadido requiere_dibujo_cnc ---
+    # (Asegúrate que este cambio de la vez anterior sigue aquí)
+    requiere_dibujo_cnc: bool = Field(
+        default=False,
+        description="Indica si este servicio requiere un archivo de dibujo CNC."
+    )
 
 class ServicioDefinicionCreate(ServicioDefinicionBase):
     """Schema para crear una nueva definición de servicio."""
     # Hereda todos los campos necesarios de la base.
     pass
+
 
 class ServicioDefinicionRead(ServicioDefinicionBase):
     """Schema para devolver información de definición de servicio."""
@@ -63,11 +80,17 @@ class ServicioDefinicionRead(ServicioDefinicionBase):
 
 class ServicioDefinicionUpdate(SQLModel):
     """Schema para actualizar una definición de servicio. Todos los campos opcionales."""
+    # --- CAMBIO: Añadido codigo (opcional) ---
+    codigo: Optional[str] = Field(default=None, max_length=50)
+    # --- FIN CAMBIO ---
     nombre: Optional[str] = Field(default=None, max_length=255)
     descripcion: Optional[str] = Field(default=None)
-    unidad_medida: Optional[str] = Field(default=None, max_length=50)
+    unidad_cobro: Optional[str] = Field(default=None, max_length=50)
     costo_por_unidad: Optional[condecimal(max_digits=10, decimal_places=3)] = Field(default=None) # type: ignore
     costo_por_minuto: Optional[condecimal(max_digits=10, decimal_places=3)] = Field(default=None) # type: ignore
     tiempo_setup_min: Optional[condecimal(max_digits=10, decimal_places=3)] = Field(default=None) # type: ignore
     tiempo_preparado_min_por_unidad: Optional[condecimal(max_digits=10, decimal_places=3)] = Field(default=None) # type: ignore
     factor_ih: Optional[condecimal(max_digits=10, decimal_places=3)] = Field(default=None) # type: ignore
+    # --- CAMBIO: Añadido requiere_dibujo_cnc (opcional) ---
+    requiere_dibujo_cnc: Optional[bool] = Field(default=None)
+    # --- FIN CAMBIO ---

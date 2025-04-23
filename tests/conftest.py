@@ -23,6 +23,8 @@ MAT_DIM_ENDPOINT = f"{INVENTARIO_ENDPOINT}/materiales-dimensionales"
 MAT_CONS_ENDPOINT = f"{INVENTARIO_ENDPOINT}/materiales-consumibles"
 MAT_SIMP_ENDPOINT = f"{INVENTARIO_ENDPOINT}/materiales-simples"
 STOCK_ITEM_DIM_ENDPOINT = f"{INVENTARIO_ENDPOINT}/stock-items-dimensionales"
+SERVICIOS_ENDPOINT = f"{API_V1_STR}/servicios" # O donde la tengas definida
+DEFINICIONES_ENDPOINT = f"{SERVICIOS_ENDPOINT}/definiciones"
 
 # ==================================
 #  1. Carga de Configuración de Prueba
@@ -59,6 +61,8 @@ from app.initial_data import initial_roles, initial_permissions, role_permission
 from app.repositories import usuario_repository
 # 'permiso_repository' no se usaba directamente aquí y fue eliminado.
 
+from app.models import ServicioDefinicion
+from app.schemas.service_schema import ServicioDefinicionCreate
 
 # ==========================================
 #  3. Configuración de Base de Datos de Prueba
@@ -418,18 +422,18 @@ def test_user_factory(module_db_session: Session, seeded_roles: Dict[str, Rol]) 
     Yields:
         Callable: La función `_create_user(username, email, password, roles_names)`.
     """
-    print(f"\nDEBUG: Iniciando test_user_factory (scope='module') con session id: {id(module_db_session)}")
+    #print(f"\nDEBUG: Iniciando test_user_factory (scope='module') con session id: {id(module_db_session)}")
     created_users_for_cleanup = [] # Lista para rastrear usuarios creados por esta factory
 
     def _create_user(username: str, email: str, password: str, roles_names: List[str] = None) -> Usuario:
         """Función interna para crear o retornar un usuario de prueba."""
-        print(f"DEBUG: _create_user: Intentando crear/obtener usuario '{username}'...")
+        #print(f"DEBUG: _create_user: Intentando crear/obtener usuario '{username}'...")
         session = module_db_session # Usar la sesión del módulo
         try:
             # Intentar obtener usuario existente en caso de re-llamada en el mismo módulo
             existing = usuario_repository.get_usuario_by_username(db=session, username=username)
             if existing:
-                print(f"DEBUG: _create_user: Usuario '{username}' ya existía en sesión de módulo.")
+                #print(f"DEBUG: _create_user: Usuario '{username}' ya existía en sesión de módulo.")
                 # Asegurar que esté en la lista de limpieza si no lo estaba
                 if not any(u["id"] == existing.id for u in created_users_for_cleanup):
                     created_users_for_cleanup.append({"id": existing.id, "username": username})
@@ -458,10 +462,10 @@ def test_user_factory(module_db_session: Session, seeded_roles: Dict[str, Rol]) 
             # Verificar inmediatamente si el usuario se puede recuperar en la misma sesión
             retrieved_user = session.get(Usuario, user.id)
             if retrieved_user:
-                print(f"DEBUG: _create_user: VERIFICADO - Usuario ID={user.id} ('{retrieved_user.username}') creado y encontrado en sesión.")
+                #print(f"DEBUG: _create_user: VERIFICADO - Usuario ID={user.id} ('{retrieved_user.username}') creado y encontrado en sesión.")
                 if roles_names:
                     session.refresh(retrieved_user, attribute_names=["roles"])
-                    print(f"DEBUG: _create_user: Roles asignados (verif.): {[r.nombre for r in retrieved_user.roles]}")
+                    #print(f"DEBUG: _create_user: Roles asignados (verif.): {[r.nombre for r in retrieved_user.roles]}")
             else:
                 # Esto no debería ocurrir si create_new_user funciona correctamente
                 print(f"ERROR CRÍTICO: _create_user: Usuario ID={user.id} NO encontrado después de crear!")
@@ -481,25 +485,25 @@ def test_user_factory(module_db_session: Session, seeded_roles: Dict[str, Rol]) 
     yield _create_user # La factory devuelve la función interna
 
     # --- Código de limpieza (Teardown del módulo) ---
-    print(f"\nDEBUG: test_user_factory (TEARDOWN Módulo): Limpiando {len(created_users_for_cleanup)} usuarios: {[u['username'] for u in created_users_for_cleanup]}")
+    #print(f"\nDEBUG: test_user_factory (TEARDOWN Módulo): Limpiando {len(created_users_for_cleanup)} usuarios: {[u['username'] for u in created_users_for_cleanup]}")
     if created_users_for_cleanup:
         user_ids = [u["id"] for u in created_users_for_cleanup]
         # Usar una nueva sesión efímera para la limpieza
         cleanup_db = TestingSessionLocal()
         try:
             # Eliminar primero las dependencias en UsuarioRol
-            print(f"DEBUG (Cleanup): Eliminando links usuario_rol para usuarios: {user_ids}")
+            #print(f"DEBUG (Cleanup): Eliminando links usuario_rol para usuarios: {user_ids}")
             stmt_links = sa.delete(UsuarioRol).where(UsuarioRol.usuario_id.in_(user_ids))
             cleanup_db.execute(stmt_links)
 
             # Luego eliminar los usuarios
-            print(f"DEBUG (Cleanup): Eliminando usuarios: {user_ids}")
+            #print(f"DEBUG (Cleanup): Eliminando usuarios: {user_ids}")
             stmt_users = sa.delete(Usuario).where(Usuario.id.in_(user_ids))
             result = cleanup_db.execute(stmt_users)
             cleanup_db.commit()
-            print(f"DEBUG (Cleanup): Usuarios de prueba y sus links eliminados: {user_ids} (Count: {result.rowcount})")
+            #print(f"DEBUG (Cleanup): Usuarios de prueba y sus links eliminados: {user_ids} (Count: {result.rowcount})")
         except Exception as e:
-            print(f"ERROR limpiando usuarios de prueba: {e}")
+            #print(f"ERROR limpiando usuarios de prueba: {e}")
             cleanup_db.rollback()
         finally:
             cleanup_db.close()
@@ -513,6 +517,17 @@ def admin_user(test_user_factory: Callable) -> Usuario:
 def vendedor_user(test_user_factory: Callable) -> Usuario:
     """Fixture (scope='module') que crea/obtiene el usuario 'testvendedor'."""
     return test_user_factory(username="testvendedor", email="vendedor@test.com", password="password123", roles_names=["Vendedor"])
+
+@pytest.fixture(scope="module")
+def dibujante_user(test_user_factory: Callable) -> Usuario:
+    """Fixture (scope='module') que crea/obtiene el usuario 'testdibujante'."""
+    return test_user_factory(username="testdibujante", email="dibujante@test.com", password="password123", roles_names=["Dibujante"])
+
+@pytest.fixture(scope="module")
+def operario_user(test_user_factory: Callable) -> Usuario:
+    """Fixture (scope='module') que crea/obtiene el usuario 'testoperario'."""
+    return test_user_factory(username="testoperario", email="operario@test.com", password="password123", roles_names=["Operario"])
+
 
 
 # --- Fixtures para Tipos de Material ---
@@ -579,7 +594,7 @@ def material_simple_de_prueba(admin_client: TestClient, db_session: Session) -> 
         unidad_medida="ciento",
         stock_minimo=Decimal("2.0")
     )
-    payload_dict = payload_schema.model_dump(mode='json') # Correcto
+    payload_dict = payload_schema.model_dump(mode='json') 
 
     response = admin_client.post(MAT_SIMP_ENDPOINT, json=payload_dict)
     assert response.status_code == status.HTTP_201_CREATED, f"Fallo al crear MaterialSimple en fixture: {response.text}"
@@ -594,7 +609,38 @@ def material_simple_de_prueba(admin_client: TestClient, db_session: Session) -> 
     print(f"Fixture: MaterialSimple creado: ID={db_obj.id}, SKU={db_obj.sku}")
     return db_obj
 
-# --- Fixture para Item de Stock Dimensional ---
+@pytest.fixture(scope="function")
+def servicio_definicion_de_prueba(admin_client: TestClient, db_session: Session) -> ServicioDefinicion:
+    """Fixture para crear una definición de servicio de prueba vía API."""
+    unique_suffix = uuid.uuid4().hex[:6]
+    payload_schema = ServicioDefinicionCreate(
+        codigo=f"FIX-SERV-{unique_suffix}",
+        nombre=f"Servicio Test {unique_suffix}",
+        unidad_cobro="hora",
+        descripcion="Descripción Fixture", # Añadir descripción explícita
+        costo_por_unidad=Decimal("0.0"), # Valor explícito aunque sea Optional
+        costo_por_minuto=Decimal("1.5"), # Ya estaba explícito
+        requiere_dibujo_cnc=False,
+        tiempo_setup_min=Decimal("5.0"), # Valor explícito (antes usaba default)
+        tiempo_preparado_min_por_unidad=Decimal("0.1"), # Valor explícito (antes usaba default)
+        factor_ih=Decimal("1.1"), # Valor explícito (antes usaba default)
+    )
+    payload_dict = payload_schema.model_dump(mode='json')
+
+    response = admin_client.post(DEFINICIONES_ENDPOINT, json=payload_dict)
+
+    assert response.status_code == status.HTTP_201_CREATED, \
+        f"Fallo al crear ServicioDefinicion en fixture: {response.text}"
+    data = response.json()
+    servicio_id = data["id"]
+
+    db_session.close()
+    with TestingSessionLocal() as verification_db:
+        db_obj = verification_db.get(ServicioDefinicion, servicio_id)
+
+    assert db_obj is not None, "No se pudo recuperar ServicioDefinicion de BD en fixture (nueva sesión)"
+    print(f"Fixture: ServicioDefinicion creado: ID={db_obj.id}, Nombre={db_obj.nombre}")
+    return db_obj
 
 @pytest.fixture(scope="function")
 def stock_item_dimensional_de_prueba(
@@ -693,10 +739,15 @@ def vendedor_token(get_auth_token: Callable, vendedor_user: Usuario) -> str:
     print(f"DEBUG [conftest]: vendedor_token obtenido: ...{token[-6:]}")
     return token
 
+
 @pytest.fixture(scope="module")
-def operario_user(test_user_factory: Callable) -> Usuario:
-    """Fixture (scope='module') que crea/obtiene el usuario 'testoperario'."""
-    return test_user_factory(username="testoperario", email="operario@test.com", password="password123", roles_names=["Operario"])
+def dibujante_token(get_auth_token: Callable, dibujante_user: Usuario) -> str:
+    """Fixture (scope='module') que obtiene y devuelve el token para 'testdibujante'."""
+    print("DEBUG [conftest]: Obteniendo dibujante_token (module scope)...")
+    assert dibujante_user and dibujante_user.username, "Fixture dibujante_user no disponible o sin username"
+    token = get_auth_token(username=dibujante_user.username, password="password123")
+    print(f"DEBUG [conftest]: dibujante_token obtenido: ...{token[-6:]}")
+    return token
 
 @pytest.fixture(scope="module")
 def operario_token(get_auth_token: Callable, operario_user: Usuario) -> str:
@@ -706,6 +757,19 @@ def operario_token(get_auth_token: Callable, operario_user: Usuario) -> str:
     token = get_auth_token(username=operario_user.username, password="password123")
     print(f"DEBUG [conftest]: operario_token obtenido: ...{token[-6:]}")
     return token
+
+@pytest.fixture(scope="function")
+def dibujante_client(dibujante_token: str) -> Generator[TestClient, None, None]:
+    """
+    Fixture (scope='function') que proporciona un cliente de prueba INDEPENDIENTE
+    autenticado como Dibujante.
+    """
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as client:
+        client.headers["Authorization"] = f"Bearer {dibujante_token}"
+        print(f"DEBUG [conftest - dibujante_client setup]: Creado cliente INDEPENDIENTE ID={id(client)} con token Dibujante ...{dibujante_token[-6:]}")
+        yield client
+    print(f"DEBUG [conftest - dibujante_client teardown]: Destruido cliente INDEPENDIENTE ID={id(client)}.")
 
 @pytest.fixture(scope="function")
 def operario_client(operario_token: str) -> Generator[TestClient, None, None]:

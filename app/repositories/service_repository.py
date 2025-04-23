@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from app.models.service_models import ServicioDefinicion
 
 logger = logging.getLogger(__name__)
+import traceback
 
 # =======================================
 # Repositorio para ServicioDefinicion
@@ -41,23 +42,34 @@ def list_servicios(db: Session, *, skip: int = 0, limit: int = 100) -> Sequence[
         logger.error(f"Error listando ServicioDefinicion: {e}", exc_info=True)
         raise
 
+
 def create_servicio(db: Session, *, servicio_data: ServicioDefinicion) -> ServicioDefinicion:
     """Crea una nueva definición de servicio."""
     db_servicio = servicio_data
     try:
         db.add(db_servicio)
+        logger.info(f"Repositorio: Intentando commit para ServicioDefinicion Código='{db_servicio.codigo}'")
         db.commit()
+        logger.info(f"Repositorio: Commit exitoso. Intentando refresh...")
         db.refresh(db_servicio)
-        logger.info(f"ServicioDefinicion creado: ID={db_servicio.id}, Nombre='{db_servicio.nombre}'")
+        logger.info(f"ServicioDefinicion creado: ID={db_servicio.id}, Código='{db_servicio.codigo}'")
         return db_servicio
-    except IntegrityError as e: # Podría ocurrir si se añade UNIQUE(nombre) en el futuro
+    except IntegrityError as e:
         db.rollback()
-        logger.warning(f"Error de integridad al crear ServicioDefinicion Nombre '{db_servicio.nombre}': {e}")
-        raise e # Relanzar para que el servicio maneje (ej: 409 si nombre debe ser único)
+        logger.warning(f"Error de integridad al crear ServicioDefinicion Código '{db_servicio.codigo}': {e}")
+        raise e
     except Exception as e:
         db.rollback()
-        logger.error(f"Error inesperado creando ServicioDefinicion '{db_servicio.nombre}': {e}", exc_info=True)
-        raise
+        # --- CAMBIO AQUÍ: Usando print() para depuración ---
+        print("\n" + "="*20 + " ERROR CAPTURADO EN REPOSITORIO (create_servicio) " + "="*20)
+        print(f"Error inesperado creando ServicioDefinicion Código '{db_servicio.codigo}':")
+        print(f"Tipo de Excepción: {type(e).__name__}")
+        print(f"Argumentos: {e.args}")
+        print(f"Representación: {repr(e)}")
+        print(f"Traceback:\n{traceback.format_exc()}")
+        print("="*70 + "\n")
+        # --- FIN CAMBIO ---
+        raise # Relanzar la excepción original
 
 def update_servicio(db: Session, *, db_servicio: ServicioDefinicion, update_data: Dict[str, Any]) -> ServicioDefinicion:
     """Actualiza una definición de servicio."""

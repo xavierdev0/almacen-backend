@@ -134,18 +134,18 @@ def require_permission(required_permission: str) -> Callable:
         current_user: Annotated[Usuario, Depends(get_current_active_user)]
     ):
         """Dependencia interna que realiza la verificación."""
-        print(f"\n--- DEBUG [require_permission] para '{required_permission}' ---") 
-        print(f"--- DEBUG Usuario: ID={current_user.id}, Username='{current_user.username}'") 
+        #print(f"\n--- DEBUG [require_permission] para '{required_permission}' ---") 
+        #print(f"--- DEBUG Usuario: ID={current_user.id}, Username='{current_user.username}'") 
 
         user_permissions: Set[str] = set()
         if not current_user.roles:
              print(f"--- WARNING Usuario ID={current_user.id} no tiene roles asignados.") 
         else:
-            print(f"--- DEBUG Roles encontrados: {[r.nombre for r in current_user.roles]}") 
+            #print(f"--- DEBUG Roles encontrados: {[r.nombre for r in current_user.roles]}") 
             for role in current_user.roles:
-                print(f"--- DEBUG Procesando Rol: ID={role.id}, Nombre='{role.nombre}'") 
+                #print(f"--- DEBUG Procesando Rol: ID={role.id}, Nombre='{role.nombre}'") 
                 if hasattr(role, 'permisos') and role.permisos is not None:
-                    print(f"--- DEBUG  Rol '{role.nombre}' - Atributo 'permisos' existe y no es None. Intentando iterar...") 
+                    #print(f"--- DEBUG  Rol '{role.nombre}' - Atributo 'permisos' existe y no es None. Intentando iterar...") 
                     perm_count_in_role = 0
                     try:
                         for permission in role.permisos:
@@ -156,7 +156,7 @@ def require_permission(required_permission: str) -> Callable:
                                 # print(f"    Añadido permiso: {permission_str}") # Descomentar si es necesario ver cada uno
                             else:
                                 print(f"    ERROR: Objeto permiso inválido o atributos faltantes en Rol ID={role.id}: {permission}") 
-                        print(f"--- DEBUG  Rol '{role.nombre}' - Se añadieron {perm_count_in_role} permisos al set.") 
+                        #print(f"--- DEBUG  Rol '{role.nombre}' - Se añadieron {perm_count_in_role} permisos al set.") 
                     except Exception as iter_exc:
                         print(f"--- ERROR CRÍTICO al iterar role.permisos para Rol ID={role.id}: {iter_exc}") 
 
