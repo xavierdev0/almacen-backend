@@ -15,6 +15,8 @@ import alembic.command
 import sqlalchemy as sa # Necesario para sa.delete
 import uuid
 from app.core.config import settings
+from app.models.order_models import PedidoCliente
+from app.schemas.order_schema import PedidoClienteCreate
 
 CLIENTES_ENDPOINT = f"{settings.API_V1_STR}/clientes"
 API_V1_STR = settings.API_V1_STR
@@ -25,6 +27,7 @@ MAT_SIMP_ENDPOINT = f"{INVENTARIO_ENDPOINT}/materiales-simples"
 STOCK_ITEM_DIM_ENDPOINT = f"{INVENTARIO_ENDPOINT}/stock-items-dimensionales"
 SERVICIOS_ENDPOINT = f"{API_V1_STR}/servicios" # O donde la tengas definida
 DEFINICIONES_ENDPOINT = f"{SERVICIOS_ENDPOINT}/definiciones"
+PEDIDOS_ENDPOINT = f"{API_V1_STR}/pedidos"
 
 # ==================================
 #  1. Carga de Configuración de Prueba
@@ -58,12 +61,13 @@ from app.schemas.inventory_schema import MaterialConsumibleCreate, MaterialDimen
 # Importar initial_data aunque no se use directamente, las migraciones de Alembic dependen de él.
 from app.initial_data import initial_roles, initial_permissions, role_permission_mapping
 # Importar repositorios necesarios
-from app.repositories import usuario_repository
+from app.repositories import order_repository, usuario_repository
 # 'permiso_repository' no se usaba directamente aquí y fue eliminado.
 
 from app.models import ServicioDefinicion
 from app.schemas.service_schema import ServicioDefinicionCreate
-
+import logging 
+logger = logging.getLogger(__name__) # Añadir logger
 # ==========================================
 #  3. Configuración de Base de Datos de Prueba
 # ==========================================
@@ -674,6 +678,86 @@ def stock_item_dimensional_de_prueba(
     assert db_obj is not None, "No se pudo recuperar StockItemDimensional de BD en fixture (nueva sesión)" # <<< CORRECCIÓN: assert sobre el objeto de la nueva sesión
     print(f"Fixture: StockItemDimensional creado: ID={db_obj.id} para MaterialID={db_obj.material_dimensional_id}")
     return db_obj
+
+
+"""
+
+@pytest.fixture(scope="function")
+def pedido_de_prueba(vendedor_client: TestClient, cliente_de_prueba: Cliente, db_session: Session) -> PedidoCliente:
+    "Fixture para crear un pedido de prueba antes de tests GET/PUT/DELETE."
+    payload = PedidoClienteCreate(cliente_id=cliente_de_prueba.id)
+    response = vendedor_client.post(PEDIDOS_ENDPOINT, json=payload.model_dump())
+    assert response.status_code == status.HTTP_201_CREATED, f"Fallo al crear Pedido en fixture: {response.text}"
+    pedido_id = response.json()["id"]
+    db_session.expire_all()
+    # Obtener de la BD para devolver el objeto completo usando la sesión del test refrescada
+    pedido_db = order_repository.get_pedido_by_id(db=db_session, pedido_id=pedido_id, load_related=True)
+    # Añadir mensaje más descriptivo al assert
+    assert pedido_db is not None, f"Pedido ID {pedido_id} creado vía API no fue encontrado en BD por la fixture (después de expire_all)."
+    print(f"Fixture: Pedido de prueba creado y VERIFICADO: ID={pedido_db.id}")
+    return pedido_db
+"""
+
+
+@pytest.fixture(scope="function")
+def pedido_de_prueba(vendedor_client: TestClient, cliente_de_prueba: Cliente, db_session: Session) -> PedidoCliente:
+    """Fixture para crear un pedido de prueba antes de tests GET/PUT/DELETE."""
+    logger.debug(f"Fixture 'pedido_de_prueba' iniciando con db_session ID: {id(db_session)}")
+    payload = PedidoClienteCreate(cliente_id=cliente_de_prueba.id)
+    response = vendedor_client.post(PEDIDOS_ENDPOINT, json=payload.model_dump())
+    assert response.status_code == status.HTTP_201_CREATED, f"Fallo al crear Pedido en fixture: {response.text}"
+    pedido_id = response.json()["id"]
+    logger.info(f"Fixture 'pedido_de_prueba': Pedido ID {pedido_id} creado vía API.")
+
+    # --- CORRECCIÓN: Usar una nueva sesión para verificación ---
+    logger.debug(f"Fixture 'pedido_de_prueba': Cerrando db_session ID {id(db_session)} antes de verificar.")
+    # No es estrictamente necesario cerrar aquí si se usa 'with' abajo,
+    # pero puede ayudar a liberar recursos si hay problemas.
+    # db_session.close() 
+
+    pedido_db = None # Inicializar
+    try:
+        with TestingSessionLocal() as verification_db:
+            logger.debug(f"Fixture 'pedido_de_prueba': Abierta verification_db ID {id(verification_db)} para buscar Pedido ID {pedido_id}.")
+            # Obtener de la BD para devolver el objeto completo usando la nueva sesión
+            pedido_db = order_repository.get_pedido_by_id(db=verification_db, pedido_id=pedido_id, load_related=True)
+            logger.debug(f"Fixture 'pedido_de_prueba': Resultado de get_pedido_by_id con verification_db: {'Encontrado' if pedido_db else 'No Encontrado'}")
+            # Añadir mensaje más descriptivo al assert
+            assert pedido_db is not None, f"Pedido ID {pedido_id} creado vía API no fue encontrado en BD por la fixture (con sesión de verificación)."
+            logger.info(f"Fixture 'pedido_de_prueba': Pedido ID={pedido_db.id} verificado exitosamente.")
+            # ¡Importante! No podemos devolver pedido_db directamente aquí porque
+            # la sesión verification_db se cerrará al salir del 'with'.
+            # Necesitamos devolver datos o re-obtener con la sesión original del test.
+            # Para simplificar, devolvamos solo el ID por ahora y que el test lo busque.
+            # O, si el test necesita el objeto, hay que buscarlo de nuevo con su propia sesión.
+            # Vamos a devolver el ID y ajustar los tests.
+
+            # ALTERNATIVA: Devolver el objeto, pero los tests tendrán que manejar sesiones potencialmente cerradas.
+            # return pedido_db # <--- Esto podría causar problemas si el test usa el objeto después.
+
+            # MEJOR ALTERNATIVA: Re-obtener con la sesión original (si no la cerramos arriba)
+            # pedido_db_original_session = db_session.get(PedidoCliente, pedido_id) # Asume que db_session sigue viva
+            # return pedido_db_original_session # <--- Requiere no cerrar db_session arriba
+
+            # ENFOQUE MÁS SEGURO: Devolver el objeto obtenido, pero documentar que la sesión está cerrada.
+            # O forzar carga eager de todo lo necesario aquí.
+            # Forzar carga de relaciones necesarias ANTES de que se cierre la sesión
+            if pedido_db:
+                 _ = pedido_db.cliente # Acceder para cargar
+                 _ = pedido_db.vendedor # Acceder para cargar
+                 _ = pedido_db.proformas # Acceder para cargar lista (vacía inicialmente)
+
+    except Exception as e:
+         logger.error(f"Error en fixture 'pedido_de_prueba' durante verificación: {e}", exc_info=True)
+         pytest.fail(f"Error en fixture 'pedido_de_prueba' durante verificación: {e}")
+
+    # Asegurarse de que devolvemos algo si la verificación pasó.
+    if pedido_db is None:
+         pytest.fail(f"Fixture 'pedido_de_prueba': pedido_db sigue siendo None después del bloque 'with'.")
+
+    # Devolver el objeto obtenido de la sesión de verificación.
+    # El test que lo use deberá tener cuidado si intenta operaciones lazy load.
+    return pedido_db
 
 # ============================
 #  11. Fixtures de Tokens de Autenticación

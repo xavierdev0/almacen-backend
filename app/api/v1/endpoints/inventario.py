@@ -13,7 +13,7 @@ from app.services import inventory_service
 from app.schemas.inventory_schema import (
     MaterialDimensionalCreate, MaterialDimensionalUpdate, MaterialDimensionalRead,
     MaterialConsumibleCreate, MaterialConsumibleUpdate, MaterialConsumibleRead,
-    MaterialSimpleCreate, MaterialSimpleUpdate, MaterialSimpleRead,
+    MaterialSimpleCreate, MaterialSimpleUpdate, MaterialSimpleRead, StockAdjustRequest,
     StockItemDimensionalCreate, StockItemDimensionalRead,
 )
 
@@ -172,9 +172,6 @@ def delete_material_consumible(
     inventory_service.delete_material_consumible_service(db=db, mat_cons_id=mat_cons_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-# Schema para ajuste de stock
-class StockAdjustRequest(BaseModel):
-    change_amount: Decimal = Field(..., description="Cantidad a añadir (positivo) o quitar (negativo) del stock.")
 
 @router_mat_cons.post("/{mat_cons_id}/ajustar-stock", response_model=MaterialConsumibleRead, summary="Ajustar stock de Material Consumible", dependencies=[Depends(require_permission("ajustar:stock"))])
 def adjust_stock_consumible(

@@ -1,7 +1,7 @@
 
 # app/schemas/inventory_schema.py
 from sqlmodel import SQLModel, Field
-from pydantic import condecimal # Para validación de decimales
+from pydantic import BaseModel, condecimal # Para validación de decimales
 from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal # Asegurar importación
@@ -186,6 +186,12 @@ class StockItemDimensionalRead(StockItemDimensionalBase):
     # definicion_material: Optional[MaterialDimensionalRead] = None # Si se necesita info completa
 
     model_config = {"from_attributes": True}
+
+
+# Schema para ajuste de stock
+class StockAdjustRequest(BaseModel):
+    change_amount: Decimal = Field(..., description="Cantidad a añadir (positivo) o quitar (negativo) del stock.")
+
 
 # Aún no definimos StockItemDimensionalUpdate, ya que la actualización
 # puede ser compleja (cambio de estado, dimensiones por corte, etc.)

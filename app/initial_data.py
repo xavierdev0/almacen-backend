@@ -52,6 +52,7 @@ initial_permissions = [
     {'nombre_accion': 'adjuntar', 'nombre_recurso': 'archivo_proforma', 'descripcion': 'Subir archivos a proforma (ej: CNC).'},
     # Pedidos y Órdenes
     {'nombre_accion': 'leer', 'nombre_recurso': 'pedido_cliente', 'descripcion': 'Ver estado general del pedido.'},
+    {'nombre_accion': 'crear', 'nombre_recurso': 'pedido_cliente', 'descripcion': 'Crear nuevos pedidos de clientes.'},
     {'nombre_accion': 'leer', 'nombre_recurso': 'orden_produccion', 'descripcion': 'Ver detalles de orden de producción.'},
     {'nombre_accion': 'tomar', 'nombre_recurso': 'tarea_orden', 'descripcion': 'Asignarse/Tomar tarea de una orden.'},
     {'nombre_accion': 'actualizar', 'nombre_recurso': 'tarea_orden', 'descripcion': 'Registrar avance/completar tarea.'},
@@ -102,7 +103,7 @@ role_permission_mapping = {
         'leer:cliente', 'crear:cliente', 'actualizar:cliente', 'eliminar:cliente',
         'leer:proforma', 'crear:proforma', 'actualizar:proforma_global', 'cancelar:proforma',
         'enviar:proforma', 'posponer:proforma', 'adjuntar:archivo_proforma',
-        'leer:pedido_cliente', 'leer:orden_produccion', 'gestionar:orden_produccion',
+        'leer:pedido_cliente', 'crear:pedido_cliente','leer:orden_produccion', 'gestionar:orden_produccion',
         'adjuntar:archivo_orden', 'leer:material_definicion', 'gestionar:material_definicion',
         'leer:stock', 'ajustar:stock', 'ver:merma', 'leer:area_trabajo',
         'gestionar:area_trabajo', 'asignar:usuario_area', 'remover:usuario_area',
@@ -119,7 +120,7 @@ role_permission_mapping = {
         'leer:cliente', 'crear:cliente', 'actualizar:cliente', 'leer:proforma',
         'crear:proforma', 'actualizar:proforma_propia', 'cancelar:proforma',
         'enviar:proforma', 'posponer:proforma', 'adjuntar:archivo_proforma',
-        'leer:pedido_cliente', 'leer:orden_produccion', 'leer:material_definicion',
+        'leer:pedido_cliente', 'crear:pedido_cliente', 'leer:orden_produccion', 'leer:material_definicion',
         'leer:stock', 'leer:servicio_definicion', 'leer:venta_factura',
         'actualizar:estado_pago', 'registrar:mi_indisponibilidad'
     ],

@@ -16,30 +16,33 @@ from app.schemas.inventory_schema import (
     MaterialSimpleCreate, MaterialSimpleRead, MaterialSimpleUpdate,
     StockItemDimensionalCreate, StockItemDimensionalRead,
 )
-# Importar el schema de ajuste de stock que definimos en el endpoint
+# Importar el schema de ajuste de stock
 from app.api.v1.endpoints.inventario import StockAdjustRequest
 
-# Importar modelos para type hints y verificaciones
+# Importar modelos para verificaciones y fixtures
 from app.models import (
     MaterialDimensional,
     MaterialConsumible,
     MaterialSimple,
     StockItemDimensional
 )
+# Importar repositorios para verificaciones (aunque usar .get es más simple)
+from app.repositories import inventory_repository
 # Importar constantes de endpoints y fábrica de sesión desde conftest
 from tests.conftest import (
-    TestingSessionLocal,
+    TestingSessionLocal, # Importar la factory para sesiones de verificación
     MAT_DIM_ENDPOINT,
     MAT_CONS_ENDPOINT,
     MAT_SIMP_ENDPOINT,
     STOCK_ITEM_DIM_ENDPOINT
 )
+# Importar fixtures de cliente necesarias (si no están globales)
+from tests.conftest import admin_client, vendedor_client, operario_client
 
 logger = logging.getLogger(__name__)
 
-# --- Helpers para Crear Payloads Válidos ---
+# --- Helpers para Crear Payloads Válidos  ---
 def create_valid_mat_dim_payload(suffix: str) -> dict:
-    """Crea un payload válido y JSON-serializable para MaterialDimensionalCreate."""
     schema_instance = MaterialDimensionalCreate(
         sku=f"SKU-DIM-{suffix}",
         nombre=f"Plancha Test {suffix}",
@@ -49,7 +52,6 @@ def create_valid_mat_dim_payload(suffix: str) -> dict:
     return schema_instance.model_dump(mode='json')
 
 def create_valid_mat_cons_payload(suffix: str) -> dict:
-    """Crea un payload válido y JSON-serializable para MaterialConsumibleCreate."""
     schema_instance = MaterialConsumibleCreate(
         sku=f"SKU-CONS-{suffix}",
         nombre=f"Consumible Test {suffix}",
@@ -58,7 +60,6 @@ def create_valid_mat_cons_payload(suffix: str) -> dict:
     return schema_instance.model_dump(mode='json')
 
 def create_valid_mat_simp_payload(suffix: str) -> dict:
-    """Crea un payload válido y JSON-serializable para MaterialSimpleCreate."""
     schema_instance = MaterialSimpleCreate(
         sku=f"SKU-SIMP-{suffix}",
         nombre=f"Simple Test {suffix}",
@@ -79,13 +80,18 @@ class TestMaterialDimensionalAPI:
         data = response.json()
         assert data["sku"] == payload["sku"]
         assert data["nombre"] == payload["nombre"]
-        # Comparar convirtiendo a Decimal
-        assert Decimal(data["espesor_nominal"]) == Decimal(payload["espesor_nominal"]) # <<< CORRECCIÓN COMPARACIÓN DECIMAL
+        assert Decimal(data["espesor_nominal"]) == Decimal(payload["espesor_nominal"])
         new_id = data["id"]
-        db_obj = db_session.get(MaterialDimensional, new_id)
-        assert db_obj is not None
-        assert db_obj.sku == payload["sku"]
-        assert db_obj.espesor_nominal == Decimal(payload["espesor_nominal"])
+
+        try:
+            with TestingSessionLocal() as verification_db:
+                db_obj = verification_db.get(MaterialDimensional, new_id)
+                assert db_obj is not None, f"MaterialDimensional ID {new_id} no encontrado en BD post-creación."
+                assert db_obj.sku == payload["sku"]
+                assert db_obj.espesor_nominal == Decimal(payload["espesor_nominal"])
+                logger.info(f"Test 'test_create_material_dimensional_success_admin': MaterialDimensional ID {new_id} verificado.")
+        except Exception as e:
+            pytest.fail(f"Error durante verificación BD en test_create_material_dimensional_success_admin: {e}")
 
     def test_create_material_dimensional_duplicate_sku(self, admin_client: TestClient, material_dimensional_de_prueba: MaterialDimensional):
         payload_schema = MaterialDimensionalCreate(
@@ -120,10 +126,9 @@ class TestMaterialDimensionalAPI:
         assert isinstance(data, list)
         assert any(item["id"] == material_dimensional_de_prueba.id for item in data)
 
-    def test_list_materiales_dimensionales_permission_vendedor(self, vendedor_client: TestClient): # <<< RENOMBRADO
-        """Verifica que el Vendedor PUEDE listar (según error previo). Ajustar si cambian permisos."""
+    def test_list_materiales_dimensionales_permission_vendedor(self, vendedor_client: TestClient):
         response = vendedor_client.get(MAT_DIM_ENDPOINT)
-        assert response.status_code == status.HTTP_200_OK # <<< CORRECCIÓN ASSERTION
+        assert response.status_code == status.HTTP_200_OK
 
     def test_get_material_dimensional_success(self, admin_client: TestClient, material_dimensional_de_prueba: MaterialDimensional):
         response_get = admin_client.get(f"{MAT_DIM_ENDPOINT}/{material_dimensional_de_prueba.id}")
@@ -150,9 +155,9 @@ class TestMaterialDimensionalAPI:
         assert data["id"] == material_dimensional_de_prueba.id
         assert data["nombre"] == update_schema.nombre
         assert data["descripcion"] == update_schema.descripcion
-         # Comparar convirtiendo a Decimal
-        assert Decimal(data["espesor_nominal"]) == update_schema.espesor_nominal # <<< CORRECCIÓN COMPARACIÓN DECIMAL
+        assert Decimal(data["espesor_nominal"]) == update_schema.espesor_nominal
         assert data["sku"] == material_dimensional_de_prueba.sku
+
         with TestingSessionLocal() as verification_db:
              db_obj_updated = verification_db.get(MaterialDimensional, material_dimensional_de_prueba.id)
              assert db_obj_updated is not None
@@ -173,8 +178,16 @@ class TestMaterialDimensionalAPI:
         created_id = response_create.json()["id"]
         response_delete = admin_client.delete(f"{MAT_DIM_ENDPOINT}/{created_id}")
         assert response_delete.status_code == status.HTTP_204_NO_CONTENT
-        db_session.expire_all()
-        assert db_session.get(MaterialDimensional, created_id) is None
+
+        # --- VERIFICACIÓN REFACTORIZADA ---
+        try:
+            with TestingSessionLocal() as verification_db:
+                logger.debug(f"Test 'test_delete_material_dimensional_success': Verificando ID {created_id} con nueva sesión.")
+                deleted_obj = verification_db.get(MaterialDimensional, created_id)
+                assert deleted_obj is None, f"MaterialDimensional ID {created_id} aún encontrado en BD post-delete."
+                logger.info(f"Test 'test_delete_material_dimensional_success': MaterialDimensional ID {created_id} verificado como eliminado.")
+        except Exception as e:
+            pytest.fail(f"Error durante verificación BD en test_delete_material_dimensional_success: {e}")
 
     def test_delete_material_dimensional_not_found(self, admin_client: TestClient):
         response = admin_client.delete(f"{MAT_DIM_ENDPOINT}/999999")
@@ -185,12 +198,10 @@ class TestMaterialDimensionalAPI:
         material_id = stock_item_dimensional_de_prueba.material_dimensional_id
         response = admin_client.delete(f"{MAT_DIM_ENDPOINT}/{material_id}")
         assert response.status_code == status.HTTP_409_CONFLICT
-    
-    def test_list_materiales_dimensionales_forbidden_operario(self, operario_client: TestClient): # Usa la nueva fixture
-        """Prueba que un Operario (sin permiso) no puede listar tipos de material (403)."""
+
+    def test_list_materiales_dimensionales_forbidden_operario(self, operario_client: TestClient):
         response = operario_client.get(MAT_DIM_ENDPOINT)
         assert response.status_code == status.HTTP_403_FORBIDDEN
-        # Verificar el mensaje específico de error de permiso si es posible/deseado
         assert "Permiso insuficiente: Se requiere 'leer:material_definicion'" in response.json()["detail"]
 
 
@@ -206,7 +217,16 @@ class TestMaterialConsumibleAPI:
         assert response.status_code == status.HTTP_201_CREATED
         data = response.json()
         assert data["sku"] == payload["sku"]
-        assert db_session.get(MaterialConsumible, data["id"]) is not None
+        new_id = data["id"]
+
+        try:
+            with TestingSessionLocal() as verification_db:
+                db_obj = verification_db.get(MaterialConsumible, new_id)
+                assert db_obj is not None, f"MaterialConsumible ID {new_id} no encontrado en BD post-creación."
+                assert db_obj.sku == payload["sku"]
+                logger.info(f"Test 'test_create_material_consumible_success': MaterialConsumible ID {new_id} verificado.")
+        except Exception as e:
+            pytest.fail(f"Error durante verificación BD en test_create_material_consumible_success: {e}")
 
     def test_create_material_consumible_duplicate_sku(self, admin_client: TestClient, material_consumible_de_prueba: MaterialConsumible):
         payload_schema = MaterialConsumibleCreate(
@@ -218,13 +238,97 @@ class TestMaterialConsumibleAPI:
         response = admin_client.post(MAT_CONS_ENDPOINT, json=payload_dict)
         assert response.status_code == status.HTTP_409_CONFLICT
 
-    # ... (Añadir aquí tests GET, PUT, DELETE para MaterialConsumible) ...
+    def test_create_material_consumible_invalid_data(self, admin_client: TestClient):
+        payload_no_sku = {"nombre": "Test Cons Sin SKU", "unidad_medida": "litro"}
+        response_no_sku = admin_client.post(MAT_CONS_ENDPOINT, json=payload_no_sku)
+        assert response_no_sku.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        payload_no_unit = {"sku": "TEST-CONS-NOUNIT", "nombre": "Test Cons Sin Unidad"}
+        response_no_unit = admin_client.post(MAT_CONS_ENDPOINT, json=payload_no_unit)
+        assert response_no_unit.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    def test_create_material_consumible_forbidden(self, vendedor_client: TestClient):
+        suffix = uuid.uuid4().hex[:6]
+        payload = create_valid_mat_cons_payload(suffix)
+        response = vendedor_client.post(MAT_CONS_ENDPOINT, json=payload)
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_list_materiales_consumibles_success(self, admin_client: TestClient, material_consumible_de_prueba: MaterialConsumible):
+        response_list = admin_client.get(MAT_CONS_ENDPOINT)
+        assert response_list.status_code == status.HTTP_200_OK
+        data = response_list.json()
+        assert isinstance(data, list)
+        assert any(item["id"] == material_consumible_de_prueba.id for item in data)
+
+    def test_list_materiales_consumibles_permission_vendedor(self, vendedor_client: TestClient):
+        response = vendedor_client.get(MAT_CONS_ENDPOINT)
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_get_material_consumible_success(self, admin_client: TestClient, material_consumible_de_prueba: MaterialConsumible):
+        response_get = admin_client.get(f"{MAT_CONS_ENDPOINT}/{material_consumible_de_prueba.id}")
+        assert response_get.status_code == status.HTTP_200_OK
+        data = response_get.json()
+        assert data["id"] == material_consumible_de_prueba.id
+        assert data["sku"] == material_consumible_de_prueba.sku
+
+    def test_get_material_consumible_not_found(self, admin_client: TestClient):
+        response = admin_client.get(f"{MAT_CONS_ENDPOINT}/999999")
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_update_material_consumible_success(self, admin_client: TestClient, material_consumible_de_prueba: MaterialConsumible):
+        update_suffix = uuid.uuid4().hex[:4]
+        update_schema = MaterialConsumibleUpdate(
+            nombre=f"Consumible ACTUALIZADO {update_suffix}",
+            descripcion="Nueva desc",
+            stock_minimo=Decimal("25.5")
+        )
+        update_payload = update_schema.model_dump(mode='json', exclude_unset=True)
+        response_update = admin_client.put(f"{MAT_CONS_ENDPOINT}/{material_consumible_de_prueba.id}", json=update_payload)
+        assert response_update.status_code == status.HTTP_200_OK
+        data = response_update.json()
+        assert data["id"] == material_consumible_de_prueba.id
+        assert data["nombre"] == update_schema.nombre
+        assert data["descripcion"] == update_schema.descripcion
+        assert Decimal(data["stock_minimo"]) == update_schema.stock_minimo
+
+        with TestingSessionLocal() as verification_db:
+             db_obj_updated = verification_db.get(MaterialConsumible, material_consumible_de_prueba.id)
+             assert db_obj_updated is not None
+             assert db_obj_updated.nombre == update_schema.nombre
+             assert db_obj_updated.stock_minimo == update_schema.stock_minimo
+
+    def test_update_material_consumible_not_found(self, admin_client: TestClient):
+        update_payload = MaterialConsumibleUpdate(nombre="Test").model_dump(mode='json', exclude_unset=True)
+        response = admin_client.put(f"{MAT_CONS_ENDPOINT}/999999", json=update_payload)
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_delete_material_consumible_success(self, admin_client: TestClient, db_session: Session):
+        suffix = uuid.uuid4().hex[:6]
+        payload = create_valid_mat_cons_payload(suffix)
+        response_create = admin_client.post(MAT_CONS_ENDPOINT, json=payload)
+        assert response_create.status_code == status.HTTP_201_CREATED
+        created_id = response_create.json()["id"]
+        response_delete = admin_client.delete(f"{MAT_CONS_ENDPOINT}/{created_id}")
+        assert response_delete.status_code == status.HTTP_204_NO_CONTENT
+        # --- VERIFICACIÓN REFACTORIZADA ---
+        try:
+            with TestingSessionLocal() as verification_db:
+                deleted_obj = verification_db.get(MaterialConsumible, created_id)
+                assert deleted_obj is None, f"MaterialConsumible ID {created_id} aún encontrado en BD post-delete."
+                logger.info(f"Test 'test_delete_material_consumible_success': MaterialConsumible ID {created_id} verificado como eliminado.")
+        except Exception as e:
+            pytest.fail(f"Error durante verificación BD en test_delete_material_consumible_success: {e}")
+        # --- FIN VERIFICACIÓN ---
+
+    def test_delete_material_consumible_not_found(self, admin_client: TestClient):
+        response = admin_client.delete(f"{MAT_CONS_ENDPOINT}/999999")
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    # @pytest.mark.skip(reason="PENDIENTE: Implementar cuando FormulaItem o LineaProformaMaterial use MaterialConsumible.")
+    # def test_delete_material_consumible_conflict(self, admin_client: TestClient, ...)
 
     def test_adjust_stock_consumible_success(self, admin_client: TestClient, material_consumible_de_prueba: MaterialConsumible):
         mat_id = material_consumible_de_prueba.id
-        # Leer stock inicial de la fixture (que ya fue recuperada con nueva sesión)
-        initial_stock = material_consumible_de_prueba.stock_actual
-        assert initial_stock is not None # Asegurarse que no es None
+        initial_stock = material_consumible_de_prueba.stock_actual or Decimal("0.0") # Default a 0 si es None
 
         # Añadir stock
         adjust_payload_add_schema = StockAdjustRequest(change_amount=Decimal("50.5"))
@@ -233,7 +337,16 @@ class TestMaterialConsumibleAPI:
         assert response_add.status_code == status.HTTP_200_OK
         data_add = response_add.json()
         expected_stock_add = initial_stock + adjust_payload_add_schema.change_amount
-        assert Decimal(data_add["stock_actual"]) == expected_stock_add
+        assert Decimal(data_add["stock_actual"]) == pytest.approx(expected_stock_add) # Usar approx por floats
+
+        try:
+            with TestingSessionLocal() as verification_db_add:
+                db_obj_add = verification_db_add.get(MaterialConsumible, mat_id)
+                assert db_obj_add is not None
+                assert db_obj_add.stock_actual == pytest.approx(expected_stock_add)
+                logger.info(f"Test 'test_adjust_stock_consumible_success' (add): Stock verificado en BD para ID {mat_id}.")
+        except Exception as e:
+            pytest.fail(f"Error verificación BD (add) en test_adjust_stock_consumible_success: {e}")
 
         # Quitar stock
         adjust_payload_sub_schema = StockAdjustRequest(change_amount=Decimal("-10.0"))
@@ -243,6 +356,15 @@ class TestMaterialConsumibleAPI:
         data_sub = response_sub.json()
         expected_stock_sub = expected_stock_add + adjust_payload_sub_schema.change_amount
         assert Decimal(data_sub["stock_actual"]) == pytest.approx(expected_stock_sub)
+
+        try:
+            with TestingSessionLocal() as verification_db_sub:
+                db_obj_sub = verification_db_sub.get(MaterialConsumible, mat_id)
+                assert db_obj_sub is not None
+                assert db_obj_sub.stock_actual == pytest.approx(expected_stock_sub)
+                logger.info(f"Test 'test_adjust_stock_consumible_success' (sub): Stock verificado en BD para ID {mat_id}.")
+        except Exception as e:
+            pytest.fail(f"Error verificación BD (sub) en test_adjust_stock_consumible_success: {e}")
 
     def test_adjust_stock_consumible_negative_result(self, admin_client: TestClient, material_consumible_de_prueba: MaterialConsumible):
         mat_id = material_consumible_de_prueba.id
@@ -257,104 +379,6 @@ class TestMaterialConsumibleAPI:
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
-    def test_create_material_consumible_invalid_data(self, admin_client: TestClient):
-        """Prueba crear MaterialConsumible con datos inválidos (422)."""
-        payload_no_sku = {"nombre": "Test Cons Sin SKU", "unidad_medida": "litro"}
-        response_no_sku = admin_client.post(MAT_CONS_ENDPOINT, json=payload_no_sku)
-        assert response_no_sku.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-
-        payload_no_unit = {"sku": "TEST-CONS-NOUNIT", "nombre": "Test Cons Sin Unidad"}
-        response_no_unit = admin_client.post(MAT_CONS_ENDPOINT, json=payload_no_unit)
-        assert response_no_unit.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-
-    def test_create_material_consumible_forbidden(self, vendedor_client: TestClient):
-        """Prueba que Vendedor no puede crear MaterialConsumible (403)."""
-        suffix = uuid.uuid4().hex[:6]
-        payload = create_valid_mat_cons_payload(suffix)
-        response = vendedor_client.post(MAT_CONS_ENDPOINT, json=payload)
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-
-    def test_list_materiales_consumibles_success(self, admin_client: TestClient, material_consumible_de_prueba: MaterialConsumible):
-        """Prueba listar tipos de MaterialConsumible."""
-        response_list = admin_client.get(MAT_CONS_ENDPOINT)
-        assert response_list.status_code == status.HTTP_200_OK
-        data = response_list.json()
-        assert isinstance(data, list)
-        assert any(item["id"] == material_consumible_de_prueba.id for item in data)
-
-    def test_list_materiales_consumibles_permission_vendedor(self, vendedor_client: TestClient):
-        """Verifica que Vendedor puede listar."""
-        response = vendedor_client.get(MAT_CONS_ENDPOINT)
-        assert response.status_code == status.HTTP_200_OK # Asumiendo que Vendedor tiene 'leer:material_definicion'
-
-    def test_get_material_consumible_success(self, admin_client: TestClient, material_consumible_de_prueba: MaterialConsumible):
-        """Prueba obtener un MaterialConsumible por ID."""
-        response_get = admin_client.get(f"{MAT_CONS_ENDPOINT}/{material_consumible_de_prueba.id}")
-        assert response_get.status_code == status.HTTP_200_OK
-        data = response_get.json()
-        assert data["id"] == material_consumible_de_prueba.id
-        assert data["sku"] == material_consumible_de_prueba.sku
-
-    def test_get_material_consumible_not_found(self, admin_client: TestClient):
-        """Prueba obtener un MaterialConsumible inexistente (404)."""
-        response = admin_client.get(f"{MAT_CONS_ENDPOINT}/999999")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    def test_update_material_consumible_success(self, admin_client: TestClient, material_consumible_de_prueba: MaterialConsumible):
-        """Prueba actualizar un MaterialConsumible."""
-        update_suffix = uuid.uuid4().hex[:4]
-        update_schema = MaterialConsumibleUpdate(
-            nombre=f"Consumible ACTUALIZADO {update_suffix}",
-            descripcion="Nueva desc",
-            stock_minimo=Decimal("25.5")
-        )
-        update_payload = update_schema.model_dump(mode='json', exclude_unset=True)
-
-        response_update = admin_client.put(f"{MAT_CONS_ENDPOINT}/{material_consumible_de_prueba.id}", json=update_payload)
-        assert response_update.status_code == status.HTTP_200_OK
-        data = response_update.json()
-        assert data["id"] == material_consumible_de_prueba.id
-        assert data["nombre"] == update_schema.nombre
-        assert data["descripcion"] == update_schema.descripcion
-        assert Decimal(data["stock_minimo"]) == update_schema.stock_minimo # Comparar Decimal
-
-        # Verificar en BD
-        with TestingSessionLocal() as verification_db:
-             db_obj_updated = verification_db.get(MaterialConsumible, material_consumible_de_prueba.id)
-             assert db_obj_updated is not None
-             assert db_obj_updated.nombre == update_schema.nombre
-             assert db_obj_updated.stock_minimo == update_schema.stock_minimo
-
-    def test_update_material_consumible_not_found(self, admin_client: TestClient):
-        """Prueba actualizar un MaterialConsumible inexistente (404)."""
-        update_payload = MaterialConsumibleUpdate(nombre="Test").model_dump(mode='json', exclude_unset=True)
-        response = admin_client.put(f"{MAT_CONS_ENDPOINT}/999999", json=update_payload)
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    def test_delete_material_consumible_success(self, admin_client: TestClient, db_session: Session):
-        """Prueba eliminar un MaterialConsumible sin dependencias."""
-        suffix = uuid.uuid4().hex[:6]
-        payload = create_valid_mat_cons_payload(suffix)
-        response_create = admin_client.post(MAT_CONS_ENDPOINT, json=payload)
-        assert response_create.status_code == status.HTTP_201_CREATED
-        created_id = response_create.json()["id"]
-
-        response_delete = admin_client.delete(f"{MAT_CONS_ENDPOINT}/{created_id}")
-        assert response_delete.status_code == status.HTTP_204_NO_CONTENT
-
-        db_session.expire_all()
-        assert db_session.get(MaterialConsumible, created_id) is None
-
-    def test_delete_material_consumible_not_found(self, admin_client: TestClient):
-        """Prueba eliminar un MaterialConsumible inexistente (404)."""
-        response = admin_client.delete(f"{MAT_CONS_ENDPOINT}/999999")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    # @pytest.mark.skip(reason="PENDIENTE: Implementar cuando FormulaItem o LineaProformaMaterial use MaterialConsumible.")
-    # def test_delete_material_consumible_conflict(self, admin_client: TestClient, ...)
-
-
-
 # =====================================================
 # --- Tests para Endpoints de Material Simple ---
 # =====================================================
@@ -367,7 +391,16 @@ class TestMaterialSimpleAPI:
         assert response.status_code == status.HTTP_201_CREATED
         data = response.json()
         assert data["sku"] == payload["sku"]
-        assert db_session.get(MaterialSimple, data["id"]) is not None
+        new_id = data["id"]
+
+        try:
+            with TestingSessionLocal() as verification_db:
+                db_obj = verification_db.get(MaterialSimple, new_id)
+                assert db_obj is not None, f"MaterialSimple ID {new_id} no encontrado en BD post-creación."
+                assert db_obj.sku == payload["sku"]
+                logger.info(f"Test 'test_create_material_simple_success': MaterialSimple ID {new_id} verificado.")
+        except Exception as e:
+            pytest.fail(f"Error durante verificación BD en test_create_material_simple_success: {e}")
 
     def test_create_material_simple_duplicate_sku(self, admin_client: TestClient, material_simple_de_prueba: MaterialSimple):
         payload_schema = MaterialSimpleCreate(
@@ -390,7 +423,6 @@ class TestMaterialSimpleAPI:
         response = vendedor_client.post(MAT_SIMP_ENDPOINT, json=payload)
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
-    # --- GET /materiales-simples ---
     def test_list_materiales_simples_success(self, admin_client: TestClient, material_simple_de_prueba: MaterialSimple):
         response_list = admin_client.get(MAT_SIMP_ENDPOINT)
         assert response_list.status_code == status.HTTP_200_OK
@@ -402,7 +434,6 @@ class TestMaterialSimpleAPI:
         response = vendedor_client.get(MAT_SIMP_ENDPOINT)
         assert response.status_code == status.HTTP_200_OK # Vendedor puede leer
 
-    # --- GET /materiales-simples/{id} ---
     def test_get_material_simple_success(self, admin_client: TestClient, material_simple_de_prueba: MaterialSimple):
         response_get = admin_client.get(f"{MAT_SIMP_ENDPOINT}/{material_simple_de_prueba.id}")
         assert response_get.status_code == status.HTTP_200_OK
@@ -413,7 +444,6 @@ class TestMaterialSimpleAPI:
         response = admin_client.get(f"{MAT_SIMP_ENDPOINT}/999999")
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    # --- PUT /materiales-simples/{id} ---
     def test_update_material_simple_success(self, admin_client: TestClient, material_simple_de_prueba: MaterialSimple):
         update_suffix = uuid.uuid4().hex[:4]
         update_schema = MaterialSimpleUpdate(
@@ -437,7 +467,6 @@ class TestMaterialSimpleAPI:
         response = admin_client.put(f"{MAT_SIMP_ENDPOINT}/999999", json=update_payload)
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    # --- DELETE /materiales-simples/{id} ---
     def test_delete_material_simple_success(self, admin_client: TestClient, db_session: Session):
         suffix = uuid.uuid4().hex[:6]
         payload = create_valid_mat_simp_payload(suffix)
@@ -446,8 +475,14 @@ class TestMaterialSimpleAPI:
         created_id = response_create.json()["id"]
         response_delete = admin_client.delete(f"{MAT_SIMP_ENDPOINT}/{created_id}")
         assert response_delete.status_code == status.HTTP_204_NO_CONTENT
-        db_session.expire_all()
-        assert db_session.get(MaterialSimple, created_id) is None
+
+        try:
+            with TestingSessionLocal() as verification_db:
+                deleted_obj = verification_db.get(MaterialSimple, created_id)
+                assert deleted_obj is None, f"MaterialSimple ID {created_id} aún encontrado en BD post-delete."
+                logger.info(f"Test 'test_delete_material_simple_success': MaterialSimple ID {created_id} verificado como eliminado.")
+        except Exception as e:
+            pytest.fail(f"Error durante verificación BD en test_delete_material_simple_success: {e}")
 
     def test_delete_material_simple_not_found(self, admin_client: TestClient):
         response = admin_client.delete(f"{MAT_SIMP_ENDPOINT}/999999")
@@ -456,7 +491,6 @@ class TestMaterialSimpleAPI:
     # @pytest.mark.skip(reason="PENDIENTE: Implementar cuando FormulaItem o LineaProformaMaterial use MaterialSimple.")
     # def test_delete_material_simple_conflict(self, admin_client: TestClient, ...)
 
-    # --- POST /{id}/ajustar-stock ---
     def test_adjust_stock_simple_success(self, admin_client: TestClient, material_simple_de_prueba: MaterialSimple):
         mat_id = material_simple_de_prueba.id
         initial_stock = material_simple_de_prueba.stock_actual or Decimal("0.0")
@@ -466,6 +500,15 @@ class TestMaterialSimpleAPI:
         assert response_add.status_code == status.HTTP_200_OK
         expected_stock_add = initial_stock + adjust_payload_add_schema.change_amount
         assert Decimal(response_add.json()["stock_actual"]) == expected_stock_add
+
+        try:
+            with TestingSessionLocal() as verification_db_add:
+                db_obj_add = verification_db_add.get(MaterialSimple, mat_id)
+                assert db_obj_add is not None
+                assert db_obj_add.stock_actual == pytest.approx(expected_stock_add)
+                logger.info(f"Test 'test_adjust_stock_simple_success' (add): Stock verificado en BD para ID {mat_id}.")
+        except Exception as e:
+            pytest.fail(f"Error verificación BD (add) en test_adjust_stock_simple_success: {e}")
 
     def test_adjust_stock_simple_negative_result(self, admin_client: TestClient, material_simple_de_prueba: MaterialSimple):
         mat_id = material_simple_de_prueba.id
@@ -478,7 +521,6 @@ class TestMaterialSimpleAPI:
         adjust_payload = StockAdjustRequest(change_amount=Decimal("10")).model_dump(mode='json')
         response = vendedor_client.post(f"{MAT_SIMP_ENDPOINT}/{mat_id}/ajustar-stock", json=adjust_payload)
         assert response.status_code == status.HTTP_403_FORBIDDEN
-
 
 
 # ==============================================================
@@ -502,13 +544,13 @@ class TestStockItemDimensionalAPI:
         assert data["estado"] == "DISPONIBLE"
         item_id = data["id"]
 
-        # Verificar en BD con nueva sesión
         db_session.close()
         with TestingSessionLocal() as verification_db:
-            db_obj = verification_db.get(StockItemDimensional, item_id) # <<< CORRECCIÓN: Usar nueva sesión
-            assert db_obj is not None # <<< CORRECCIÓN: Verificar objeto de nueva sesión
+            db_obj = verification_db.get(StockItemDimensional, item_id)
+            assert db_obj is not None
             assert db_obj.material_dimensional_id == payload_schema.material_dimensional_id
             assert db_obj.longitud_actual == payload_schema.longitud_actual
+
 
     def test_create_stock_item_invalid_foreign_key(self, admin_client: TestClient):
         payload_schema = StockItemDimensionalCreate(
@@ -518,7 +560,7 @@ class TestStockItemDimensionalAPI:
         )
         payload_dict = payload_schema.model_dump(mode='json')
         response = admin_client.post(STOCK_ITEM_DIM_ENDPOINT, json=payload_dict)
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert response.status_code == status.HTTP_404_NOT_FOUND # El servicio valida FK
 
     def test_list_stock_items_success(self, admin_client: TestClient, stock_item_dimensional_de_prueba: StockItemDimensional):
         response = admin_client.get(STOCK_ITEM_DIM_ENDPOINT)
@@ -528,19 +570,17 @@ class TestStockItemDimensionalAPI:
         assert any(item["id"] == stock_item_dimensional_de_prueba.id for item in data)
 
     def test_list_stock_items_filtered(self, admin_client: TestClient, db_session: Session, material_dimensional_de_prueba: MaterialDimensional):
-        # Crear items (usar schema y mode='json')
+        # Crear items
         item1_schema = StockItemDimensionalCreate(material_dimensional_id=material_dimensional_de_prueba.id, longitud_actual=1000, ancho_actual=100, estado="DISPONIBLE")
         item2_schema = StockItemDimensionalCreate(material_dimensional_id=material_dimensional_de_prueba.id, longitud_actual=2000, ancho_actual=200, estado="RESERVADO")
         item3_schema = StockItemDimensionalCreate(material_dimensional_id=material_dimensional_de_prueba.id, longitud_actual=3000, ancho_actual=300, estado="DISPONIBLE")
         resp1 = admin_client.post(STOCK_ITEM_DIM_ENDPOINT, json=item1_schema.model_dump(mode='json'))
         resp2 = admin_client.post(STOCK_ITEM_DIM_ENDPOINT, json=item2_schema.model_dump(mode='json'))
         resp3 = admin_client.post(STOCK_ITEM_DIM_ENDPOINT, json=item3_schema.model_dump(mode='json'))
-        # Usar status_code para verificar
-        assert resp1.status_code == status.HTTP_201_CREATED # <<< CORRECCIÓN: Usar status_code
-        assert resp2.status_code == status.HTTP_201_CREATED # <<< CORRECCIÓN: Usar status_code
-        assert resp3.status_code == status.HTTP_201_CREATED # <<< CORRECCIÓN: Usar status_code
+        assert resp1.status_code == status.HTTP_201_CREATED
+        assert resp2.status_code == status.HTTP_201_CREATED
+        assert resp3.status_code == status.HTTP_201_CREATED
         id1 = resp1.json()["id"]; id3 = resp3.json()["id"]
-
         # Filtrar
         params = {"material_dimensional_id": material_dimensional_de_prueba.id, "estado": "DISPONIBLE"}
         response = admin_client.get(STOCK_ITEM_DIM_ENDPOINT, params=params)
@@ -565,12 +605,8 @@ class TestStockItemDimensionalAPI:
 
     def test_delete_material_dimensional_conflict(self, admin_client: TestClient, stock_item_dimensional_de_prueba: StockItemDimensional):
         """Prueba eliminar un MaterialDimensional con StockItems asociados (409)."""
-        # La fixture stock_item_dimensional_de_prueba ya crea un item y depende de
-        # material_dimensional_de_prueba. Ahora intentamos borrar el material.
         material_id = stock_item_dimensional_de_prueba.material_dimensional_id
         logger.info(f"Intentando borrar MaterialDimensional ID {material_id} que tiene StockItem ID {stock_item_dimensional_de_prueba.id} asociado.")
         response = admin_client.delete(f"{MAT_DIM_ENDPOINT}/{material_id}")
         assert response.status_code == status.HTTP_409_CONFLICT
-        assert "está en uso (stock existente)" in response.json()["detail"] # Verificar mensaje del servicio
-
-# ... (resto del archivo con placeholders) ...
+        assert "está en uso (stock existente)" in response.json()["detail"]
