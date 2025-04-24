@@ -6,8 +6,11 @@ from sqlmodel import Session, select, SQLModel
 from sqlalchemy.orm import selectinload # Para carga eager opcional
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError # Capturar errores específicos
 
+from decimal import Decimal 
+
+
 # Importar el modelo principal
-from app.models.order_models import PedidoCliente, Proforma
+from app.models.order_models import PedidoCliente, Proforma, LineaProformaMaterial, LineaProformaServicio # Asegurar estos modelos
 # Importar otros modelos necesarios para relaciones (si se usa selectinload)
 from app.models.client_model import Cliente
 from app.models.user_models import Usuario
@@ -375,4 +378,164 @@ def update_proforma(db: Session, *, db_proforma: Proforma, update_data: Dict[str
         logger.error(f"Error inesperado al actualizar Proforma ID {proforma_id}: {e}", exc_info=True)
         raise e
 
-# (Aquí añadiríamos funciones para LineaProformaMaterial, LineaProformaServicio, etc. en fases posteriores)
+
+
+# ========================================================
+# Funciones CRUD para Líneas de Proforma (NUEVAS)
+# ========================================================
+
+def add_linea_material(db: Session, *, linea_data: LineaProformaMaterial) -> LineaProformaMaterial:
+    """
+    Añade una nueva línea de material a una proforma en la base de datos.
+
+    Args:
+        db: La sesión de base de datos activa.
+        linea_data: Una instancia del modelo LineaProformaMaterial con los datos a crear
+                    (preparada por el servicio, incluyendo el total_linea calculado).
+
+    Returns:
+        El objeto LineaProformaMaterial recién creado y refrescado.
+
+    Raises:
+        IntegrityError: Si ocurre una violación de constraint (ej: FK de proforma_id inválida).
+        SQLAlchemyError: Para otros errores relacionados con la base de datos.
+        Exception: Para errores inesperados.
+    """
+    db_linea = linea_data
+    logger.debug(f"Repositorio: Intentando añadir LineaProformaMaterial a Proforma ID: {db_linea.proforma_id}")
+    try:
+        db.add(db_linea)
+        db.commit()
+        db.refresh(db_linea)
+        logger.info(f"LineaProformaMaterial añadida con éxito: ID={db_linea.id} a Proforma ID={db_linea.proforma_id}")
+        return db_linea
+    except IntegrityError as e:
+        db.rollback()
+        logger.error(f"Error de integridad al añadir LineaProformaMaterial: {e}", exc_info=True)
+        raise e # Relanzar para que el servicio maneje (ej: 404 proforma no encontrada)
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Error DB al añadir LineaProformaMaterial: {e}", exc_info=True)
+        raise e
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error inesperado al añadir LineaProformaMaterial: {e}", exc_info=True)
+        raise e
+
+def add_linea_servicio(db: Session, *, linea_data: LineaProformaServicio) -> LineaProformaServicio:
+    """
+    Añade una nueva línea de servicio a una proforma en la base de datos.
+
+    Args:
+        db: La sesión de base de datos activa.
+        linea_data: Una instancia del modelo LineaProformaServicio con los datos a crear
+                    (preparada por el servicio, incluyendo el total_linea calculado).
+
+    Returns:
+        El objeto LineaProformaServicio recién creado y refrescado.
+
+    Raises:
+        IntegrityError: Si ocurre una violación de constraint (ej: FK de proforma_id inválida).
+        SQLAlchemyError: Para otros errores relacionados con la base de datos.
+        Exception: Para errores inesperados.
+    """
+    db_linea = linea_data
+    logger.debug(f"Repositorio: Intentando añadir LineaProformaServicio a Proforma ID: {db_linea.proforma_id}")
+    try:
+        db.add(db_linea)
+        db.commit()
+        db.refresh(db_linea)
+        logger.info(f"LineaProformaServicio añadida con éxito: ID={db_linea.id} a Proforma ID={db_linea.proforma_id}")
+        return db_linea
+    except IntegrityError as e:
+        db.rollback()
+        logger.error(f"Error de integridad al añadir LineaProformaServicio: {e}", exc_info=True)
+        raise e
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Error DB al añadir LineaProformaServicio: {e}", exc_info=True)
+        raise e
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error inesperado al añadir LineaProformaServicio: {e}", exc_info=True)
+        raise e
+
+def update_proforma_totals(db: Session, *, proforma_id: int) -> Optional[Proforma]:
+    """
+    Recalcula y actualiza los campos subtotal, impuestos y total de una Proforma
+    basándose en la suma de los 'total_linea' de sus líneas asociadas.
+
+    Args:
+        db: La sesión de base de datos activa.
+        proforma_id: El ID de la proforma cuyos totales se actualizarán.
+
+    Returns:
+        El objeto Proforma actualizado si se encontró y actualizó, None si no se encontró.
+
+    Raises:
+        SQLAlchemyError: Para errores relacionados con la base de datos al leer o guardar.
+        Exception: Para errores inesperados.
+    """
+    logger.info(f"Repositorio: Recalculando totales para Proforma ID: {proforma_id}")
+    try:
+        # 1. Obtener la proforma CON sus líneas (material Y servicio) cargadas
+        #    Es crucial usar selectinload aquí para evitar N+1 queries al sumar totales.
+        query = (
+            select(Proforma)
+            .where(Proforma.id == proforma_id)
+            .options(
+                selectinload(Proforma.lineas_material),
+                selectinload(Proforma.lineas_servicio)
+            )
+        )
+        db_proforma = db.exec(query).first()
+
+        if not db_proforma:
+            logger.warning(f"Proforma ID {proforma_id} no encontrada para actualizar totales.")
+            return None # O lanzar excepción si se prefiere
+
+        # 2. Calcular nuevo subtotal sumando los totales de todas las líneas
+        new_subtotal = Decimal("0.00")
+        if db_proforma.lineas_material:
+            new_subtotal += sum(linea.total_linea for linea in db_proforma.lineas_material if linea.total_linea is not None)
+        if db_proforma.lineas_servicio:
+            new_subtotal += sum(linea.total_linea for linea in db_proforma.lineas_servicio if linea.total_linea is not None)
+
+        # 3. Calcular impuestos (Ejemplo: IVA 12% sobre subtotal - ¡AJUSTAR SEGÚN REGLAS ECUADOR!)
+        # TODO: Implementar lógica de impuestos real. ¿Depende del tipo de producto/servicio? ¿Cliente?
+        # Por ahora, un ejemplo simple o 0.
+        tasa_iva = Decimal("0.12") # Ejemplo 12%
+        new_impuestos = (new_subtotal * tasa_iva).quantize(Decimal("0.01")) # Redondear a 2 decimales
+        # new_impuestos = Decimal("0.00") # O simplemente 0 por ahora
+
+        # 4. Calcular nuevo total
+        new_total = new_subtotal + new_impuestos
+
+        logger.debug(f"Proforma ID {proforma_id}: Nuevo Subtotal={new_subtotal}, Impuestos={new_impuestos}, Total={new_total}")
+
+        # 5. Actualizar los campos en el objeto Proforma
+        update_data = {
+            "subtotal": new_subtotal,
+            "impuestos": new_impuestos,
+            "total": new_total
+        }
+        db_proforma.sqlmodel_update(update_data)
+
+        # 6. Guardar los cambios
+        db.add(db_proforma)
+        db.commit()
+        db.refresh(db_proforma) # Refrescar para obtener los valores guardados
+
+        logger.info(f"Totales actualizados exitosamente para Proforma ID: {proforma_id}")
+        return db_proforma
+
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Error DB al actualizar totales de Proforma ID {proforma_id}: {e}", exc_info=True)
+        raise e
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error inesperado al actualizar totales de Proforma ID {proforma_id}: {e}", exc_info=True)
+        raise e
+
+# (Aquí añadiríamos funciones para eliminar/actualizar líneas si fueran necesarias)

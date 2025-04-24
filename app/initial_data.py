@@ -50,6 +50,8 @@ initial_permissions = [
     {'nombre_accion': 'enviar', 'nombre_recurso': 'proforma', 'descripcion': 'Marcar proforma como lista.'},
     {'nombre_accion': 'posponer', 'nombre_recurso': 'proforma', 'descripcion': 'Guardar proforma para después.'},
     {'nombre_accion': 'adjuntar', 'nombre_recurso': 'archivo_proforma', 'descripcion': 'Subir archivos a proforma (ej: CNC).'},
+    # Ojo con este:
+    {'nombre_accion': 'anadir', 'nombre_recurso': 'linea_proforma', 'descripcion': 'Añadir líneas de material o servicio a una proforma en borrador.'},
     # Pedidos y Órdenes
     {'nombre_accion': 'leer', 'nombre_recurso': 'pedido_cliente', 'descripcion': 'Ver estado general del pedido.'},
     {'nombre_accion': 'crear', 'nombre_recurso': 'pedido_cliente', 'descripcion': 'Crear nuevos pedidos de clientes.'},
@@ -114,7 +116,8 @@ role_permission_mapping = {
         'resolver:reporte_error_maquina', 'leer:servicio_definicion',
         'gestionar:servicio_definicion', 'leer:formula', 'gestionar:formula',
         'leer:venta_factura', 'actualizar:estado_pago', 'leer:periodo_indisponibilidad',
-        'registrar:mi_indisponibilidad'
+        'registrar:mi_indisponibilidad', 
+        'anadir:linea_proforma'
     ],
     'Vendedor': [
         'leer:cliente', 'crear:cliente', 'actualizar:cliente', 'leer:proforma',
@@ -122,7 +125,8 @@ role_permission_mapping = {
         'enviar:proforma', 'posponer:proforma', 'adjuntar:archivo_proforma',
         'leer:pedido_cliente', 'crear:pedido_cliente', 'leer:orden_produccion', 'leer:material_definicion',
         'leer:stock', 'leer:servicio_definicion', 'leer:venta_factura',
-        'actualizar:estado_pago', 'registrar:mi_indisponibilidad'
+        'actualizar:estado_pago', 'registrar:mi_indisponibilidad',
+        'anadir:linea_proforma'
     ],
     'Supervisor': [
         'leer:cliente', 'leer:proforma', 'leer:pedido_cliente', 'leer:orden_produccion',
@@ -140,7 +144,7 @@ role_permission_mapping = {
         'adjuntar:archivo_proforma', 'leer:pedido_cliente', 'leer:orden_produccion',
         'tomar:tarea_orden', 'actualizar:tarea_orden', 'leer:material_definicion',
         'leer:stock', 'leer:maquina', 'leer:herramienta', 'leer:servicio_definicion',
-        'leer:formula', 'crear:reporte_error_maquina', 'registrar:mi_indisponibilidad'
+        'leer:formula', 'crear:reporte_error_maquina', 'registrar:mi_indisponibilidad', 'anadir:linea_proforma'
     ],
     'Operario': [
         'leer:orden_produccion', 'tomar:tarea_orden', 'actualizar:tarea_orden',

@@ -6,16 +6,19 @@
 
 from decimal import Decimal
 from sqlmodel import SQLModel, Field
-from pydantic import BaseModel, field_validator # Podríamos necesitarlo para otros schemas aquí
-from typing import Optional, List # Necesario para relaciones en Read
+from pydantic import BaseModel, field_validator, model_validator # Podríamos necesitarlo para otros schemas aquí
+from typing import Optional, List, Any # Necesario para relaciones en Read
 from datetime import datetime
+from decimal import Decimal
 
 # Importar schemas relacionados para anidación en PedidoClienteRead
 # Asegúrate de que estos schemas existan y estén definidos adecuadamente
 from .client_schema import ClienteRead
-from .usuario_schema import UsuarioRead # Usaremos UsuarioRead para mostrar info del vendedor
-# Importaremos ProformaRead y OrdenProduccionRead cuando los creemos
-# from .order_schema import ProformaRead, OrdenProduccionRead
+from .usuario_schema import UsuarioRead 
+from .inventory_schema import (
+    StockItemDimensionalRead, MaterialConsumibleRead, MaterialSimpleRead
+)
+from .service_schema import ServicioDefinicionRead
 
 
 # --- Lista de tipos de Proforma permitidos ---
@@ -26,6 +29,7 @@ ALLOWED_PROFORMA_ESTADO = [
     "RECHAZADA", "CANCELADA", "EXPIRADA", "POSPUESTA"
 ]
 
+ALLOWED_TIPO_MATERIAL_ORIGEN = ["STOCK_DIMENSIONAL", "CONSUMIBLE", "SIMPLE"]
 
 
 # -----------------------------------------------------
@@ -75,13 +79,11 @@ class PedidoClienteRead(SQLModel): # No hereda de Base para definir explícitame
     usuario_id_vendedor: int # Mantenemos el ID
     vendedor: UsuarioRead # Objeto Usuario completo (o lo que defina UsuarioRead)
 
-    # Podríamos añadir listas de Proformas y la Orden aquí en el futuro:
-    # proformas: List["ProformaRead"] = []
-    # orden_produccion: Optional["OrdenProduccionRead"] = None
+    proformas: List["ProformaRead"] = [] # <-- Incluir lista de proformas
+    # orden_produccion: Optional["OrdenProduccionRead"] = None # <-- Se añadirá después
 
-    model_config = {
-        "from_attributes": True # Necesario para mapear desde el modelo SQLAlchemy/SQLModel
-    }
+    model_config = {"from_attributes": True}
+
 
 class PedidoClienteUpdate(SQLModel):
     """
@@ -96,6 +98,7 @@ class PedidoClienteUpdate(SQLModel):
         description="Nuevo estado del pedido (ej: APROBADO, CANCELADO)."
     )
     # No permitimos cambiar cliente_id ni vendedor_id en una actualización directa.
+
 
 # --- Definiciones Forward para relaciones en PedidoClienteRead (cuando se creen los schemas) ---
 # ProformaRead.model_rebuild()
@@ -161,8 +164,8 @@ class ProformaRead(SQLModel): # No hereda de Base para control explícito de sal
     # creador: Optional[UsuarioRead] = None # Descomentar si se quiere incluir
 
     # Listas de líneas (se añadirán cuando se definan sus schemas Read)
-    # lineas_material: List["LineaProformaMaterialRead"] = []
-    # lineas_servicio: List["LineaProformaServicioRead"] = []
+    lineas_material: List["LineaProformaMaterialRead"] = []
+    lineas_servicio: List["LineaProformaServicioRead"] = []
 
     model_config = {"from_attributes": True}
 
@@ -187,6 +190,126 @@ class ProformaUpdate(SQLModel):
         if v is not None and v not in ALLOWED_PROFORMA_ESTADO:
             raise ValueError(f"Estado debe ser uno de: {', '.join(ALLOWED_PROFORMA_ESTADO)}")
         return v
+
+# ==========================================================
+# Schemas para LineaProformaMaterial (NUEVO)
+# ==========================================================
+
+class LineaProformaMaterialBase(SQLModel):
+    """Schema base para líneas de material en proforma."""
+    tipo_material_origen: str = Field(
+        ..., max_length=50, description=f"Origen ({', '.join(ALLOWED_TIPO_MATERIAL_ORIGEN)})"
+    )
+    # IDs opcionales del origen - solo uno debe ser no nulo
+    stock_item_dimensional_id: Optional[int] = Field(default=None, foreign_key="stock_item_dimensional.id")
+    material_consumible_id: Optional[int] = Field(default=None, foreign_key="material_consumible.id")
+    material_simple_id: Optional[int] = Field(default=None, foreign_key="material_simple.id")
+    # Campos comunes
+    cantidad: Decimal = Field(..., max_digits=10, decimal_places=3, gt=0, description="Cantidad del material")
+    detalles_corte_solicitado: Optional[str] = Field(default=None, description="Detalles específicos del corte o preparación")
+
+    @field_validator('tipo_material_origen')
+    def validate_tipo_origen(cls, v: str) -> str:
+        if v not in ALLOWED_TIPO_MATERIAL_ORIGEN:
+            raise ValueError(f"Tipo origen debe ser uno de: {', '.join(ALLOWED_TIPO_MATERIAL_ORIGEN)}")
+        return v
+
+    # Validador a nivel de modelo para asegurar que solo se proporcione un ID de origen
+    @model_validator(mode='after')
+    def check_single_material_id(cls, data: Any) -> Any:
+        if isinstance(data, SQLModel): # Adaptar si no hereda de SQLModel
+             provided_ids = [
+                 data.stock_item_dimensional_id,
+                 data.material_consumible_id,
+                 data.material_simple_id
+             ]
+             # Contar cuántos IDs tienen valor (no son None)
+             num_provided = sum(1 for id_val in provided_ids if id_val is not None)
+             if num_provided != 1:
+                 raise ValueError("Debe proporcionar exactamente un ID de origen (stock_item_dimensional_id, material_consumible_id, o material_simple_id)")
+        return data
+
+class LineaProformaMaterialCreate(LineaProformaMaterialBase):
+    """Schema para añadir una línea de material a una proforma via API."""
+    # Hereda los campos de Base.
+    # El servicio determinará 'descripcion_item', 'unidad', 'precio_unitario'
+    # basado en el ID de origen proporcionado.
+    pass
+
+class LineaProformaMaterialRead(SQLModel): # No hereda de Base para control explícito
+    """Schema para devolver información de línea de material."""
+    id: int
+    # tipo_material_origen: str # Podría incluirse si es útil
+    descripcion_item: str
+    cantidad: Decimal
+    unidad: str
+    precio_unitario: Decimal
+    total_linea: Decimal
+    detalles_corte_solicitado: Optional[str] = None
+    # --- Opcional: Información anidada del material de origen ---
+    # stock_item: Optional[StockItemDimensionalRead] = None
+    # material_consumible: Optional[MaterialConsumibleRead] = None
+    # material_simple: Optional[MaterialSimpleRead] = None
+    # --- Opcional: Lista de servicios asociados a esta línea ---
+    # servicios_asociados: List["LineaProformaServicioRead"] = []
+
+    model_config = {"from_attributes": True}
+
+# ==========================================================
+# Schemas para LineaProformaServicio (NUEVO)
+# ==========================================================
+
+class LineaProformaServicioBase(SQLModel):
+    """Schema base para líneas de servicio en proforma."""
+    servicio_definicion_id: int = Field(..., foreign_key="servicio_definicion.id", description="ID de la definición del servicio")
+    cantidad: Decimal = Field(..., max_digits=10, decimal_places=3, gt=0, description="Cantidad del servicio (según unidad de cobro)")
+    # Opcional: ID de la línea de material a la que se aplica este servicio
+    linea_proforma_material_id: Optional[int] = Field(
+        default=None, foreign_key="linea_proforma_material.id", nullable=True,
+        description="ID de la línea de material asociada (si aplica)"
+    )
+    # Campos para info específica (podrían ser rellenados por dibujante/servicio)
+    ruta_imagen_cnc: Optional[str] = Field(
+        default=None, max_length=512, nullable=True, description="Ruta al archivo CNC (si aplica)"
+    )
+    detalles_adicionales: Optional[str] = Field(
+        default=None, nullable=True, description="Notas o detalles específicos del servicio"
+    )
+
+class LineaProformaServicioCreate(LineaProformaServicioBase):
+    """Schema para añadir una línea de servicio a una proforma via API."""
+    # Hereda los campos de Base.
+    # El servicio determinará 'descripcion_servicio', 'precio_unitario'
+    # basado en el servicio_definicion_id.
+    pass
+
+class LineaProformaServicioRead(SQLModel): # No hereda de Base
+    """Schema para devolver información de línea de servicio."""
+    id: int
+    servicio_definicion_id: int
+    linea_proforma_material_id: Optional[int] = None
+    descripcion_servicio: str
+    cantidad: Decimal
+    # unidad_cobro: str # Podría venir del servicio_definicion anidado
+    precio_unitario: Decimal
+    total_linea: Decimal
+    ruta_imagen_cnc: Optional[str] = None
+    detalles_adicionales: Optional[str] = None
+    # --- Opcional: Información anidada del servicio ---
+    # servicio_definicion: Optional[ServicioDefinicionRead] = None
+
+    model_config = {"from_attributes": True}
+
+
+# --- Actualizar Forward References ---
+# Es necesario si los schemas se referencian entre sí dentro de este mismo archivo
+# (ej: PedidoClienteRead -> ProformaRead -> Linea...Read)
+ProformaRead.model_rebuild()
+PedidoClienteRead.model_rebuild()
+# LineaProformaMaterialRead.model_rebuild() # Descomentar si se usa servicio_asociados
+# LineaProformaServicioRead.model_rebuild() # Descomentar si se usa en LineaProformaMaterialRead
+
+
 
 # --- Definiciones Forward para relaciones futuras ---
 # (Necesarias si definimos LineaProforma*Read aquí y los usamos en ProformaRead)

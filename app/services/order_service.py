@@ -1,18 +1,20 @@
 # app/services/order_service.py
 
 import datetime
+from decimal import Decimal # Asegurar Decimal
 import logging
-from typing import Optional, Sequence, Tuple# Sequence es preferible para listas de retorno
+from typing import Any, Optional, Sequence, Tuple# Sequence es preferible para listas de retorno
 from sqlmodel import Session
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError # Para capturar errores del repo
 
 # Importar Repositorios
-from app.repositories import order_repository, cliente_repository # Necesitamos cliente_repo para validar
+from app.repositories import order_repository, cliente_repository, inventory_repository, service_repository# Necesitamos cliente_repo para validar
 
 # Importar Modelos y Schemas
-from app.models.order_models import PedidoCliente, Proforma
-from app.schemas.order_schema import PedidoClienteCreate, PedidoClienteRead, ProformaUpdate # Usamos Create para entrada
+from app.models.order_models import PedidoCliente, Proforma, LineaProformaMaterial, LineaProformaServicio
+from app.schemas.order_schema import PedidoClienteCreate, PedidoClienteRead, ProformaUpdate, LineaProformaMaterialCreate, LineaProformaServicioCreate # Usamos Create para entrada
+from app.models.service_models import ServicioDefinicion
 
 logger = logging.getLogger(__name__)
 
@@ -422,3 +424,217 @@ def update_proforma_service(
         db.rollback(); logger.error(f"Error inesperado al actualizar proforma ID {proforma_id}: {e}", exc_info=True); raise HTTPException(status_code=500, detail="Error General [USP]") # noqa
 
 # (Aquí añadiríamos funciones para añadir/quitar líneas, etc.)
+
+
+
+
+# ========================================================
+# Funciones del Servicio para Líneas de Proforma (NUEVAS)
+# ========================================================
+
+def add_material_line_to_proforma(
+    db: Session, *, proforma_id: int, linea_in: LineaProformaMaterialCreate
+) -> Proforma:
+    """
+    Añade una línea de material a una proforma existente y recalcula totales.
+
+    Args:
+        db: La sesión de base de datos activa.
+        proforma_id: ID de la proforma (debe ser de tipo 'PRODUCTO').
+        linea_in: Datos de la línea a añadir (schema LineaProformaMaterialCreate).
+
+    Returns:
+        La Proforma actualizada con la nueva línea y totales recalculados.
+
+    Raises:
+        HTTPException 404: Si la proforma o el material de origen no existen.
+        HTTPException 400/409: Si la proforma no es de tipo 'PRODUCTO' o no está en estado 'BORRADOR'.
+        HTTPException 500: Para otros errores internos.
+    """
+    logger.info(f"Servicio: Intentando añadir línea de material a Proforma ID: {proforma_id}")
+
+    # 1. Obtener la proforma y validar tipo/estado
+    db_proforma = get_proforma_service(db=db, proforma_id=proforma_id, load_related=False) # No necesitamos líneas aún
+    if db_proforma.tipo != "PRODUCTO":
+        logger.warning(f"Intento de añadir línea de material a proforma tipo '{db_proforma.tipo}' (ID: {proforma_id})")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Solo se pueden añadir líneas de material a proformas de tipo 'PRODUCTO'.")
+    if db_proforma.estado != "BORRADOR":
+        logger.warning(f"Intento de añadir línea a proforma ID {proforma_id} en estado '{db_proforma.estado}'.")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"No se pueden añadir líneas a una proforma en estado '{db_proforma.estado}'. Debe estar en 'BORRADOR'.")
+
+    # 2. Obtener detalles del material de origen y determinar precio/unidad/descripción
+    material_origen: Any = None
+    precio_unitario = Decimal("0.00")
+    unidad = ""
+    descripcion_item = ""
+
+    try:
+        if linea_in.tipo_material_origen == "STOCK_DIMENSIONAL" and linea_in.stock_item_dimensional_id:
+            material_origen = inventory_repository.get_stock_item_dimensional_by_id(db=db, item_id=linea_in.stock_item_dimensional_id, load_material=True)
+            if not material_origen or not material_origen.material_dimensional: raise HTTPException(404, "Stock Item Dimensional no encontrado.")
+            # TODO: Lógica de precios para dimensional (¿precio por m2? ¿por plancha?) - Placeholder
+            precio_unitario = material_origen.material_dimensional.precio_base_venta or Decimal("50.00") # Ejemplo
+            unidad = material_origen.material_dimensional.unidad_dimension # O unidad de venta?
+            descripcion_item = f"{material_origen.material_dimensional.nombre} ({material_origen.longitud_actual}x{material_origen.ancho_actual}{unidad})"
+        elif linea_in.tipo_material_origen == "CONSUMIBLE" and linea_in.material_consumible_id:
+            material_origen = inventory_repository.get_material_consumible_by_id(db=db, material_id=linea_in.material_consumible_id)
+            if not material_origen: raise HTTPException(404, "Material Consumible no encontrado.")
+            # TODO: Usar precio de lista o tabla de precios? - Placeholder
+            precio_unitario = material_origen.precio_base_venta or Decimal("10.00") # Ejemplo
+            unidad = material_origen.unidad_medida
+            descripcion_item = material_origen.nombre
+        elif linea_in.tipo_material_origen == "SIMPLE" and linea_in.material_simple_id:
+            material_origen = inventory_repository.get_material_simple_by_id(db=db, material_id=linea_in.material_simple_id)
+            if not material_origen: raise HTTPException(404, "Material Simple no encontrado.")
+            # TODO: Usar precio de lista? - Placeholder
+            precio_unitario = material_origen.precio_base_venta or Decimal("5.00") # Ejemplo
+            unidad = material_origen.unidad_medida
+            descripcion_item = material_origen.nombre
+        else:
+            # Esto no debería ocurrir si el validador del schema funcionó
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tipo de material origen o ID no válido.")
+
+    except HTTPException as e:
+        # Relanzar 404 o 400
+        if e.status_code == 404:
+            detail_msg = f"Material de origen no encontrado: Tipo={linea_in.tipo_material_origen}, ID={linea_in.stock_item_dimensional_id or linea_in.material_consumible_id or linea_in.material_simple_id}"
+            logger.warning(detail_msg)
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail_msg)
+        else:
+            raise e
+    except Exception as e:
+         logger.error(f"Error buscando material de origen para línea proforma: {e}", exc_info=True)
+         raise HTTPException(status_code=500, detail="Error interno al buscar material de origen.")
+
+    # 3. Calcular total de la línea
+    total_linea = (linea_in.cantidad * precio_unitario).quantize(Decimal("0.01"))
+
+    # 4. Crear la instancia del modelo LineaProformaMaterial
+    linea_db_instance = LineaProformaMaterial(
+        # Datos del input schema
+        proforma_id=proforma_id,
+        tipo_material_origen=linea_in.tipo_material_origen,
+        stock_item_dimensional_id=linea_in.stock_item_dimensional_id,
+        material_consumible_id=linea_in.material_consumible_id,
+        material_simple_id=linea_in.material_simple_id,
+        cantidad=linea_in.cantidad,
+        detalles_corte_solicitado=linea_in.detalles_corte_solicitado,
+        # Datos obtenidos/calculados
+        descripcion_item=descripcion_item,
+        unidad=unidad,
+        precio_unitario=precio_unitario,
+        total_linea=total_linea
+    )
+
+    # 5. Añadir la línea a la BD y actualizar totales
+    try:
+        _ = order_repository.add_linea_material(db=db, linea_data=linea_db_instance)
+        # Recalcular totales de la proforma
+        updated_proforma = order_repository.update_proforma_totals(db=db, proforma_id=proforma_id)
+        if updated_proforma is None:
+            # Esto no debería pasar si la proforma existía al principio
+            raise HTTPException(status_code=404, detail="Proforma no encontrada durante actualización de totales.") # noqa
+        logger.info(f"Línea de material añadida y totales actualizados para Proforma ID {proforma_id}")
+        # Devolver la proforma actualizada (que ahora incluye la nueva línea si se cargan relaciones)
+        # Es mejor recargarla para asegurar que la relación está presente
+        return get_proforma_service(db=db, proforma_id=proforma_id, load_related=True)
+
+    except IntegrityError as e: db.rollback(); logger.error(f"Error integridad al añadir línea mat: {e}", exc_info=True); raise HTTPException(status_code=409, detail="Conflicto DB [ALMP]") # noqa
+    except SQLAlchemyError as e: db.rollback(); logger.error(f"Error DB al añadir línea mat: {e}", exc_info=True); raise HTTPException(status_code=500, detail="Error DB [ALMP]") # noqa
+    except Exception as e: db.rollback(); logger.error(f"Error inesperado al añadir línea mat: {e}", exc_info=True); raise HTTPException(status_code=500, detail="Error General [ALMP]") # noqa
+
+
+def add_servicio_line_to_proforma(
+    db: Session, *, proforma_id: int, linea_in: LineaProformaServicioCreate
+) -> Proforma:
+    """
+    Añade una línea de servicio a una proforma existente y recalcula totales.
+
+    Args:
+        db: La sesión de base de datos activa.
+        proforma_id: ID de la proforma (debe ser de tipo 'SERVICIO').
+        linea_in: Datos de la línea a añadir (schema LineaProformaServicioCreate).
+
+    Returns:
+        La Proforma actualizada con la nueva línea y totales recalculados.
+
+    Raises:
+        HTTPException 404: Si la proforma, servicio o línea de material asociada no existen.
+        HTTPException 400/409: Si la proforma no es de tipo 'SERVICIO' o no está en 'BORRADOR',
+                               o si se provee linea_proforma_material_id inválida.
+        HTTPException 500: Para otros errores internos.
+    """
+    logger.info(f"Servicio: Intentando añadir línea de servicio a Proforma ID: {proforma_id}")
+
+    # 1. Obtener la proforma y validar tipo/estado
+    db_proforma = get_proforma_service(db=db, proforma_id=proforma_id, load_related=False)
+    if db_proforma.tipo != "SERVICIO":
+        logger.warning(f"Intento de añadir línea de servicio a proforma tipo '{db_proforma.tipo}' (ID: {proforma_id})")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Solo se pueden añadir líneas de servicio a proformas de tipo 'SERVICIO'.")
+    if db_proforma.estado != "BORRADOR":
+        logger.warning(f"Intento de añadir línea a proforma ID {proforma_id} en estado '{db_proforma.estado}'.")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"No se pueden añadir líneas a una proforma en estado '{db_proforma.estado}'. Debe estar en 'BORRADOR'.")
+
+    # 2. Obtener detalles de la definición del servicio
+    try:
+        servicio_def = service_repository.get_servicio_definicion_by_id(db=db, definicion_id=linea_in.servicio_definicion_id)
+        if not servicio_def:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"ServicioDefinicion con ID {linea_in.servicio_definicion_id} no encontrado.")
+
+        # TODO: Lógica de precios para servicios (¿fijo? ¿por tiempo? ¿por unidad?) - Placeholder
+        # Usamos costo_por_unidad como ejemplo si existe, si no, un default
+        precio_unitario = servicio_def.costo_por_unidad or Decimal("15.00") # Ejemplo
+        descripcion_servicio = servicio_def.nombre
+        # unidad = servicio_def.unidad_cobro # Podríamos necesitarla
+
+    except HTTPException as e: raise e # noqa
+    except Exception as e: logger.error(f"Error buscando servicio definición ID {linea_in.servicio_definicion_id}: {e}", exc_info=True); raise HTTPException(500,"Error buscando def. servicio") # noqa
+
+    # 3. Validar linea_proforma_material_id si se proporcionó
+    if linea_in.linea_proforma_material_id is not None:
+        # Verificar que la línea de material existe y pertenece a la proforma de producto vinculada
+        if not db_proforma.proforma_vinculada_id:
+             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No se puede asociar línea de servicio a material si la proforma no está vinculada.")
+        # Obtener la línea de material (podríamos crear una función repo get_linea_material_by_id)
+        try:
+             linea_material_db = db.get(LineaProformaMaterial, linea_in.linea_proforma_material_id)
+             if not linea_material_db:
+                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Linea de material asociada con ID {linea_in.linea_proforma_material_id} no encontrada.")
+             # Verificar que pertenece a la proforma vinculada
+             if linea_material_db.proforma_id != db_proforma.proforma_vinculada_id:
+                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La línea de material asociada no pertenece a la proforma de producto vinculada.")
+        except HTTPException as e: raise e # noqa
+        except Exception as e: logger.error(f"Error validando linea material ID {linea_in.linea_proforma_material_id}: {e}", exc_info=True); raise HTTPException(500,"Error validando línea material") # noqa
+
+    # 4. Calcular total de la línea
+    total_linea = (linea_in.cantidad * precio_unitario).quantize(Decimal("0.01"))
+
+    # 5. Crear la instancia del modelo LineaProformaServicio
+    linea_db_instance = LineaProformaServicio(
+        # Datos del input schema
+        proforma_id=proforma_id,
+        servicio_definicion_id=linea_in.servicio_definicion_id,
+        cantidad=linea_in.cantidad,
+        linea_proforma_material_id=linea_in.linea_proforma_material_id,
+        ruta_imagen_cnc=linea_in.ruta_imagen_cnc,
+        detalles_adicionales=linea_in.detalles_adicionales,
+        # Datos obtenidos/calculados
+        descripcion_servicio=descripcion_servicio,
+        precio_unitario=precio_unitario,
+        total_linea=total_linea
+    )
+
+    # 6. Añadir la línea a la BD y actualizar totales
+    try:
+        _ = order_repository.add_linea_servicio(db=db, linea_data=linea_db_instance)
+        # Recalcular totales de la proforma
+        updated_proforma = order_repository.update_proforma_totals(db=db, proforma_id=proforma_id)
+        if updated_proforma is None:
+            raise HTTPException(status_code=404, detail="Proforma no encontrada durante actualización de totales.") # noqa
+        logger.info(f"Línea de servicio añadida y totales actualizados para Proforma ID {proforma_id}")
+        # Devolver la proforma actualizada
+        return get_proforma_service(db=db, proforma_id=proforma_id, load_related=True)
+
+    except IntegrityError as e: db.rollback(); logger.error(f"Error integridad al añadir línea serv: {e}", exc_info=True); raise HTTPException(status_code=409, detail="Conflicto DB [ALSP]") # noqa
+    except SQLAlchemyError as e: db.rollback(); logger.error(f"Error DB al añadir línea serv: {e}", exc_info=True); raise HTTPException(status_code=500, detail="Error DB [ALSP]") # noqa
+    except Exception as e: db.rollback(); logger.error(f"Error inesperado al añadir línea serv: {e}", exc_info=True); raise HTTPException(status_code=500, detail="Error General [ALSP]") # noqa

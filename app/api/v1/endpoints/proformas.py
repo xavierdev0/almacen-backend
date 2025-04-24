@@ -12,7 +12,7 @@ from app.api.deps import get_current_active_user, get_db, require_permission
 from app.models.user_models import Usuario
 from app.services import order_service
 # Importar los schemas necesarios
-from app.schemas.order_schema import ProformaRead, ProformaUpdate
+from app.schemas.order_schema import ProformaRead, ProformaUpdate, LineaProformaMaterialCreate, LineaProformaServicioCreate
 # Importar el modelo Usuario (si se necesitara para current_user en otros endpoints)
 # from app.models import Usuario
 
@@ -122,6 +122,101 @@ def update_proforma_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error interno del servidor al actualizar la proforma."
         )
+
+
+
+
+
+
+# ======================================================
+# --- Endpoints para Añadir Líneas a Proforma (NUEVOS) ---
+# ======================================================
+
+@router.post(
+    "/{proforma_id}/lineas-material", # Ruta: POST /api/v1/proformas/{proforma_id}/lineas-material
+    response_model=ProformaRead, # Devuelve la proforma actualizada con la nueva línea
+    status_code=status.HTTP_201_CREATED,
+    summary="Añadir Línea de Material a Proforma",
+    description="Añade un ítem de material a una proforma de tipo 'PRODUCTO' que esté en estado 'BORRADOR'. Recalcula los totales.",
+    dependencies=[Depends(require_permission("anadir:linea_proforma"))] # Permiso requerido
+)
+def add_material_line_endpoint(
+    *,
+    db: Annotated[Session, Depends(get_db)],
+    proforma_id: int = Path(..., description="ID de la Proforma (tipo PRODUCTO) a la que añadir la línea", gt=0),
+    linea_in: LineaProformaMaterialCreate # Datos de la línea en el cuerpo
+):
+    """
+    Endpoint para añadir una línea de material a una Proforma.
+
+    - Requiere permiso: `anadir:linea_proforma`.
+    - Solo funciona en proformas de tipo 'PRODUCTO' en estado 'BORRADOR'.
+    - Valida que el material de origen exista.
+    - Recalcula y guarda los totales de la proforma.
+    """
+    logger.info(f"API: Solicitud POST para añadir línea de material a Proforma ID: {proforma_id}")
+    try:
+        updated_proforma = order_service.add_material_line_to_proforma(
+            db=db,
+            proforma_id=proforma_id,
+            linea_in=linea_in
+        )
+        # El servicio devuelve la proforma actualizada (incluyendo la nueva línea)
+        return updated_proforma
+    except HTTPException as http_exc:
+        # Relanzar excepciones específicas del servicio (404, 400, 409)
+        logger.warning(f"HTTPException al añadir línea material a proforma ID {proforma_id}: {http_exc.status_code} - {http_exc.detail}")
+        raise http_exc
+    except Exception as e:
+        # Capturar cualquier otro error inesperado
+        logger.error(f"Error inesperado en endpoint add_material_line: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno del servidor al añadir la línea de material."
+        )
+
+
+@router.post(
+    "/{proforma_id}/lineas-servicio", # Ruta: POST /api/v1/proformas/{proforma_id}/lineas-servicio
+    response_model=ProformaRead, # Devuelve la proforma actualizada
+    status_code=status.HTTP_201_CREATED,
+    summary="Añadir Línea de Servicio a Proforma",
+    description="Añade un ítem de servicio a una proforma de tipo 'SERVICIO' que esté en estado 'BORRADOR'. Recalcula los totales.",
+    dependencies=[Depends(require_permission("anadir:linea_proforma"))] # Mismo permiso
+)
+def add_servicio_line_endpoint(
+    *,
+    db: Annotated[Session, Depends(get_db)],
+    proforma_id: int = Path(..., description="ID de la Proforma (tipo SERVICIO) a la que añadir la línea", gt=0),
+    linea_in: LineaProformaServicioCreate # Datos de la línea en el cuerpo
+):
+    """
+    Endpoint para añadir una línea de servicio a una Proforma.
+
+    - Requiere permiso: `anadir:linea_proforma`.
+    - Solo funciona en proformas de tipo 'SERVICIO' en estado 'BORRADOR'.
+    - Valida que la definición del servicio exista.
+    - Valida la línea de material asociada si se proporciona.
+    - Recalcula y guarda los totales de la proforma.
+    """
+    logger.info(f"API: Solicitud POST para añadir línea de servicio a Proforma ID: {proforma_id}")
+    try:
+        updated_proforma = order_service.add_servicio_line_to_proforma(
+            db=db,
+            proforma_id=proforma_id,
+            linea_in=linea_in
+        )
+        return updated_proforma
+    except HTTPException as http_exc:
+        logger.warning(f"HTTPException al añadir línea servicio a proforma ID {proforma_id}: {http_exc.status_code} - {http_exc.detail}")
+        raise http_exc
+    except Exception as e:
+        logger.error(f"Error inesperado en endpoint add_servicio_line: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno del servidor al añadir la línea de servicio."
+        )
+
 
 
 # --- Endpoints Futuros para Proforma ---
