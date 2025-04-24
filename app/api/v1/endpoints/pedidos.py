@@ -9,9 +9,10 @@ from sqlmodel import Session
 # Importar dependencias necesarias
 from app.api.deps import get_db, require_permission, get_current_active_user
 # Importar el servicio correspondiente
+from app.repositories import order_repository
 from app.services import order_service
 # Importar los schemas necesarios
-from app.schemas.order_schema import PedidoClienteCreate, PedidoClienteRead
+from app.schemas.order_schema import PedidoClienteCreate, PedidoClienteRead, ProformaRead 
 # Importar el modelo Usuario para tipar current_user
 from app.models import Usuario
 
@@ -157,4 +158,41 @@ def list_pedidos_endpoint(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error interno del servidor al listar los pedidos."
+        )
+
+
+# --- NUEVO Endpoint para Listar Proformas de un Pedido ---
+@router.get(
+    "/{pedido_id}/proformas", # Ruta: GET /api/v1/pedidos/{pedido_id}/proformas
+    response_model=List[ProformaRead],
+    summary="Listar Proformas de un Pedido específico",
+    description="Obtiene la lista de proformas (normalmente 2: Producto y Servicio) asociadas a un pedido.",
+    dependencies=[Depends(require_permission("leer:proforma"))] # O podría ser "leer:pedido_cliente"
+)
+def list_proformas_for_pedido_endpoint(
+    *,
+    db: Annotated[Session, Depends(get_db)],
+    pedido_id: int = Path(..., description="ID del PedidoCliente cuyas proformas se listarán", gt=0)
+):
+    """
+    Endpoint para listar las proformas asociadas a un PedidoCliente.
+
+    - Requiere permiso: `leer:proforma`.
+    """
+    logger.info(f"API: Solicitud para listar proformas del Pedido ID: {pedido_id}")
+    # Podríamos verificar si el pedido existe primero, pero list_proformas_by_pedido
+    # devolverá una lista vacía si el pedido no existe o no tiene proformas, lo cual es aceptable.
+    # Si quisiéramos un 404 si el pedido no existe, deberíamos llamar a get_pedido_service aquí primero.
+    try:
+        # Llamamos directamente al repositorio, ya que no hay lógica de servicio compleja aquí
+        # El servicio get_pedido_service ya valida si el pedido existe si quisiéramos ser más estrictos
+        proformas = order_repository.list_proformas_by_pedido(db=db, pedido_id=pedido_id)
+        # Si no se encontraron proformas pero el pedido sí existe, se devuelve lista vacía (HTTP 200)
+        return proformas
+    except Exception as e:
+        # Capturar errores generales del repositorio o DB
+        logger.error(f"Error inesperado en endpoint list_proformas_for_pedido: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno del servidor al listar las proformas del pedido."
         )

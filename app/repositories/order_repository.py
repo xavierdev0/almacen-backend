@@ -1,13 +1,13 @@
 # app/repositories/order_repository.py
 
 import logging
-from typing import Optional, Sequence, List # Sequence es el tipo preferido para listas de retorno de ORM
+from typing import Optional, Sequence, List, Dict, Any
 from sqlmodel import Session, select, SQLModel
 from sqlalchemy.orm import selectinload # Para carga eager opcional
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError # Capturar errores específicos
 
 # Importar el modelo principal
-from app.models.order_models import PedidoCliente
+from app.models.order_models import PedidoCliente, Proforma
 # Importar otros modelos necesarios para relaciones (si se usa selectinload)
 from app.models.client_model import Cliente
 from app.models.user_models import Usuario
@@ -216,3 +216,163 @@ def update_pedido(db: Session, *, db_pedido: PedidoCliente, update_data: dict) -
 # def add_linea_material(db: Session, linea_data: LineaProformaMaterial) -> LineaProformaMaterial: ...
 # def update_proforma_totals(db: Session, proforma_id: int) -> Proforma: ...
 # ... y así sucesivamente para las otras entidades relacionadas con el pedido ...
+
+
+
+
+# =======================================
+# Funciones CRUD para Proforma (NUEVAS)
+# =======================================
+
+def create_proforma(db: Session, *, proforma_data: Proforma) -> Proforma:
+    """
+    Crea un nuevo registro de Proforma en la base de datos.
+
+    Args:
+        db: La sesión de base de datos activa.
+        proforma_data: Una instancia del modelo Proforma con los datos a crear.
+
+    Returns:
+        El objeto Proforma recién creado y refrescado.
+
+    Raises:
+        IntegrityError: Si ocurre una violación de constraint (ej: FK inválida).
+        SQLAlchemyError: Para otros errores relacionados con la base de datos.
+        Exception: Para errores inesperados.
+    """
+    db_proforma = proforma_data
+    logger.debug(f"Repositorio: Intentando añadir Proforma Tipo: {db_proforma.tipo} para Pedido ID: {db_proforma.pedido_cliente_id}")
+    try:
+        db.add(db_proforma)
+        db.commit()
+        db.refresh(db_proforma)
+        logger.info(f"Proforma creada con éxito: ID={db_proforma.id}, Tipo={db_proforma.tipo}, PedidoID={db_proforma.pedido_cliente_id}")
+        return db_proforma
+    except IntegrityError as e:
+        db.rollback()
+        logger.error(f"Error de integridad al crear Proforma: {e}", exc_info=True)
+        raise e
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Error de base de datos (SQLAlchemy) al crear Proforma: {e}", exc_info=True)
+        raise e
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error inesperado al crear Proforma: {e}", exc_info=True)
+        raise e
+
+def get_proforma_by_id(db: Session, *, proforma_id: int, load_related: bool = False) -> Optional[Proforma]:
+    """
+    Obtiene una Proforma específica por su ID.
+
+    Permite opcionalmente cargar relaciones comunes (pedido, creador, líneas).
+
+    Args:
+        db: La sesión de base de datos activa.
+        proforma_id: El ID de la proforma a buscar.
+        load_related: Si es True, carga eager las relaciones especificadas.
+
+    Returns:
+        El objeto Proforma si se encuentra, None en caso contrario.
+
+    Raises:
+        SQLAlchemyError: Para errores relacionados con la base de datos.
+        Exception: Para errores inesperados.
+    """
+    logger.debug(f"Repositorio: Buscando Proforma por ID: {proforma_id}, Cargar relacionados: {load_related}")
+    try:
+        query = select(Proforma).where(Proforma.id == proforma_id)
+        if load_related:
+            query = query.options(
+                selectinload(Proforma.pedido),
+                selectinload(Proforma.creador),
+                selectinload(Proforma.lineas_material), # Cargar líneas de material
+                selectinload(Proforma.lineas_servicio) # Cargar líneas de servicio
+                # selectinload(Proforma.proforma_vinculada) # Cargar vinculada si se necesita
+            )
+        proforma = db.exec(query).first()
+        logger.debug(f"Proforma ID {proforma_id} {'encontrada' if proforma else 'no encontrada'}.")
+        return proforma
+    except SQLAlchemyError as e:
+        logger.error(f"Error de base de datos (SQLAlchemy) al buscar Proforma ID {proforma_id}: {e}", exc_info=True); raise e
+    except Exception as e:
+        logger.error(f"Error inesperado al buscar Proforma ID {proforma_id}: {e}", exc_info=True); raise e
+
+def list_proformas_by_pedido(db: Session, *, pedido_id: int, skip: int = 0, limit: int = 10) -> Sequence[Proforma]:
+    """
+    Obtiene las proformas asociadas a un PedidoCliente específico.
+
+    Args:
+        db: La sesión de base de datos activa.
+        pedido_id: El ID del PedidoCliente cuyas proformas se listarán.
+        skip: Número de registros a saltar.
+        limit: Número máximo de registros a devolver (usualmente 2).
+
+    Returns:
+        Una secuencia (lista) de objetos Proforma asociados al pedido.
+
+    Raises:
+        SQLAlchemyError: Para errores relacionados con la base de datos.
+        Exception: Para errores inesperados.
+    """
+    logger.debug(f"Repositorio: Listando Proformas para Pedido ID: {pedido_id}")
+    try:
+        query = select(Proforma).where(Proforma.pedido_cliente_id == pedido_id)
+        # Ordenar por tipo podría ser útil (ej: PRODUCTO primero)
+        query = query.order_by(Proforma.tipo).offset(skip).limit(limit)
+        proformas = db.exec(query).all()
+        logger.debug(f"Se encontraron {len(proformas)} Proformas para Pedido ID {pedido_id}.")
+        return proformas
+    except SQLAlchemyError as e:
+        logger.error(f"Error de base de datos (SQLAlchemy) al listar Proformas para Pedido ID {pedido_id}: {e}", exc_info=True); raise e
+    except Exception as e:
+        logger.error(f"Error inesperado al listar Proformas para Pedido ID {pedido_id}: {e}", exc_info=True); raise e
+
+def update_proforma(db: Session, *, db_proforma: Proforma, update_data: Dict[str, Any]) -> Proforma:
+    """
+    Actualiza un registro de Proforma existente en la base de datos.
+    Útil para cambiar estado, notas, o vincular proformas.
+
+    Args:
+        db: La sesión de base de datos activa.
+        db_proforma: El objeto Proforma existente obtenido de la BD.
+        update_data: Un diccionario con los campos a actualizar (ej: {"estado": "APROBADA"},
+                     {"proforma_vinculada_id": X}).
+
+    Returns:
+        El objeto Proforma actualizado y refrescado.
+
+    Raises:
+        IntegrityError: Si la actualización viola alguna restricción (ej: FK a proforma_vinculada_id inválida).
+        SQLAlchemyError: Para otros errores relacionados con la base de datos.
+        Exception: Para errores inesperados.
+    """
+    proforma_id = db_proforma.id
+    logger.debug(f"Repositorio: Intentando actualizar Proforma ID: {proforma_id} con datos: {list(update_data.keys())}")
+    try:
+        if not update_data:
+            logger.warning(f"No se proporcionaron datos para actualizar Proforma ID {proforma_id}.")
+            return db_proforma
+
+        # Aplicar los cambios usando sqlmodel_update
+        db_proforma.sqlmodel_update(update_data)
+
+        db.add(db_proforma) # Marcar como modificado
+        db.commit()
+        db.refresh(db_proforma) # Obtener estado actualizado de la BD
+        logger.info(f"Proforma ID {proforma_id} actualizada con éxito.")
+        return db_proforma
+    except IntegrityError as e:
+         db.rollback()
+         logger.error(f"Error de integridad al actualizar Proforma ID {proforma_id}: {e}", exc_info=True)
+         raise e # Relanzar para que el servicio maneje (ej: 400/404 si FK es inválida)
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Error de base de datos (SQLAlchemy) al actualizar Proforma ID {proforma_id}: {e}", exc_info=True)
+        raise e
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error inesperado al actualizar Proforma ID {proforma_id}: {e}", exc_info=True)
+        raise e
+
+# (Aquí añadiríamos funciones para LineaProformaMaterial, LineaProformaServicio, etc. en fases posteriores)

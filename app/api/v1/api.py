@@ -1,7 +1,8 @@
 # app/api/v1/api.py
 from fastapi import APIRouter
 # Importar los routers existentes y los nuevos
-from app.api.v1.endpoints import auth, pedidos, usuarios, roles, permisos, clientes, inventario, service
+from app.api.v1.endpoints import auth, pedidos, usuarios, roles, permisos, clientes, inventario, service, proformas
+
 
 api_router_v1 = APIRouter()
 
@@ -52,7 +53,9 @@ api_router_v1.include_router(
 
 # Debajo de la inclusión de clientes o donde sea lógico
 api_router_v1.include_router(
-    pedidos.router,
-    # Puedes añadir respuestas globales aquí si quieres
-    # responses={404: {"description": "Pedido no encontrado"}}
+    pedidos.router
+)
+
+api_router_v1.include_router(
+    proformas.router
 )

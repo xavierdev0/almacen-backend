@@ -680,24 +680,6 @@ def stock_item_dimensional_de_prueba(
     return db_obj
 
 
-"""
-
-@pytest.fixture(scope="function")
-def pedido_de_prueba(vendedor_client: TestClient, cliente_de_prueba: Cliente, db_session: Session) -> PedidoCliente:
-    "Fixture para crear un pedido de prueba antes de tests GET/PUT/DELETE."
-    payload = PedidoClienteCreate(cliente_id=cliente_de_prueba.id)
-    response = vendedor_client.post(PEDIDOS_ENDPOINT, json=payload.model_dump())
-    assert response.status_code == status.HTTP_201_CREATED, f"Fallo al crear Pedido en fixture: {response.text}"
-    pedido_id = response.json()["id"]
-    db_session.expire_all()
-    # Obtener de la BD para devolver el objeto completo usando la sesión del test refrescada
-    pedido_db = order_repository.get_pedido_by_id(db=db_session, pedido_id=pedido_id, load_related=True)
-    # Añadir mensaje más descriptivo al assert
-    assert pedido_db is not None, f"Pedido ID {pedido_id} creado vía API no fue encontrado en BD por la fixture (después de expire_all)."
-    print(f"Fixture: Pedido de prueba creado y VERIFICADO: ID={pedido_db.id}")
-    return pedido_db
-"""
-
 
 @pytest.fixture(scope="function")
 def pedido_de_prueba(vendedor_client: TestClient, cliente_de_prueba: Cliente, db_session: Session) -> PedidoCliente:
@@ -758,6 +740,40 @@ def pedido_de_prueba(vendedor_client: TestClient, cliente_de_prueba: Cliente, db
     # Devolver el objeto obtenido de la sesión de verificación.
     # El test que lo use deberá tener cuidado si intenta operaciones lazy load.
     return pedido_db
+
+
+
+@pytest.fixture(scope="function")
+def pedido_con_proformas(
+    vendedor_client: TestClient, cliente_de_prueba: Cliente, db_session: Session
+) -> dict:
+    """Crea un PedidoCliente y sus proformas iniciales, devuelve IDs."""
+    payload = PedidoClienteCreate(cliente_id=cliente_de_prueba.id)
+    response = vendedor_client.post(PEDIDOS_ENDPOINT, json=payload.model_dump())
+    assert response.status_code == status.HTTP_201_CREATED, "Fallo al crear pedido en fixture proforma test"
+    pedido_id = response.json()["id"]
+
+    # Verificar que las proformas se crearon (usando nueva sesión)
+    proformas_creadas = []
+    with TestingSessionLocal() as verify_db:
+        proformas_creadas = order_repository.list_proformas_by_pedido(db=verify_db, pedido_id=pedido_id)
+
+    assert len(proformas_creadas) == 2, "No se crearon las 2 proformas iniciales"
+    proforma_producto = next((p for p in proformas_creadas if p.tipo == "PRODUCTO"), None)
+    proforma_servicio = next((p for p in proformas_creadas if p.tipo == "SERVICIO"), None)
+    assert proforma_producto is not None and proforma_servicio is not None, "No se encontró proforma PRODUCTO o SERVICIO"
+    assert proforma_producto.estado == "BORRADOR"
+    assert proforma_servicio.estado == "BORRADOR"
+
+    return {
+        "pedido_id": pedido_id,
+        "proforma_producto_id": proforma_producto.id,
+        "proforma_servicio_id": proforma_servicio.id
+    }
+
+
+
+
 
 # ============================
 #  11. Fixtures de Tokens de Autenticación
