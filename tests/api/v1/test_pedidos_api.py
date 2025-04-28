@@ -147,15 +147,6 @@ def test_create_pedido_success_admin(
 
 
 
-
-
-
-
-
-
-
-
-
 def test_create_pedido_cliente_not_found(vendedor_client: TestClient):
     """Prueba crear un pedido para un cliente inexistente (404)."""
     non_existent_cliente_id = 99990

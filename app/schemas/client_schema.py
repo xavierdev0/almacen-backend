@@ -46,14 +46,12 @@ class ClienteBase(SQLModel):
         description="Dirección física o fiscal del cliente."
     )
 
-    # Validación para el tipo de identificación
     @field_validator('tipo_identificacion')
     def validate_tipo_identificacion(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and v.upper() not in ALLOWED_TIPO_IDENTIFICACION:
             raise ValueError(f"Tipo de identificación debe ser uno de: {', '.join(ALLOWED_TIPO_IDENTIFICACION)}")
         return v.upper() if v is not None else None # Guardar en mayúsculas o None
 
-    # Podrían añadirse validadores más complejos aquí, por ejemplo:
     # - Que si se proporciona 'identificacion_fiscal', también se proporcione 'tipo_identificacion'.
     # - Validar el formato de 'identificacion_fiscal' según el 'tipo_identificacion' (ej., validar RUC/Cédula Ecuador).
 

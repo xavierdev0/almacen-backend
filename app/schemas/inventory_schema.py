@@ -32,6 +32,16 @@ class MaterialDimensionalBase(SQLModel):
         max_length=10,
         description="Unidad para longitud, ancho, espesor (ej: mm, cm, m, pulgadas)."
     )
+    precio_venta_base_unidad: Decimal = Field( 
+        max_digits=14, 
+        decimal_places=4, 
+        description="Precio base por unidad de medida."
+    )
+    unidad_precio_venta: str = Field(
+        max_length=20,
+        description="Unidad de medida para el precio de venta (ej: m2, m3)."
+    )
+
 
 class MaterialDimensionalCreate(MaterialDimensionalBase):
     """Schema to create a new type of dimensional material."""
@@ -42,7 +52,6 @@ class MaterialDimensionalRead(MaterialDimensionalBase):
     id: int
     fecha_creacion: Optional[datetime]
     fecha_ultima_actualizacion: Optional[datetime]
-
     model_config = {"from_attributes": True}
 
 class MaterialDimensionalUpdate(SQLModel):
@@ -52,6 +61,9 @@ class MaterialDimensionalUpdate(SQLModel):
     descripcion: Optional[str] = Field(default=None)
     espesor_nominal: Optional[condecimal(max_digits=10, decimal_places=3)] = Field(default=None) # type: ignore
     unidad_dimension: Optional[str] = Field(default=None, max_length=10)
+    precio_venta_base_unidad: Optional[Decimal] = Field(default=None, max_digits=14, decimal_places=4) # type: ignore
+    unidad_precio_venta: Optional[str] = Field(default=None, max_length=20)
+
 
 # --- Schemas para MaterialConsumible ---
 
@@ -70,6 +82,12 @@ class MaterialConsumibleBase(SQLModel):
         default=None,
         description="Nivel mínimo de stock para alertas."
     )
+    precio_venta_base_unidad: Decimal = Field(
+        max_digits=14,
+        decimal_places=4,
+        description="Precio base por unidad de medida."
+    )
+    
     ubicacion: Optional[str] = Field(default=None, max_length=255, description="Ubicación en almacén.")
 
 class MaterialConsumibleCreate(MaterialConsumibleBase):
@@ -84,7 +102,6 @@ class MaterialConsumibleRead(MaterialConsumibleBase):
     stock_actual: condecimal(max_digits=10, decimal_places=3) = Field(default=Decimal("0.0")) # type: ignore
     fecha_creacion: Optional[datetime]
     fecha_ultima_actualizacion: Optional[datetime]
-
     model_config = {"from_attributes": True}
 
 class MaterialConsumibleUpdate(SQLModel):
@@ -95,6 +112,7 @@ class MaterialConsumibleUpdate(SQLModel):
     unidad_medida: Optional[str] = Field(default=None, max_length=50)
     rendimiento_m2: Optional[condecimal(max_digits=10, decimal_places=3)] = Field(default=None) # type: ignore
     # La actualización de stock_actual debería ser una operación separada (ej: ajuste de inventario)
+    precio_venta_base_unidad: Optional[Decimal] = Field(default=None, max_digits=14, decimal_places=4)
     stock_minimo: Optional[condecimal(max_digits=10, decimal_places=3)] = Field(default=None) # type: ignore
     ubicacion: Optional[str] = Field(default=None, max_length=255)
 
@@ -106,6 +124,11 @@ class MaterialSimpleBase(SQLModel):
     nombre: str = Field(..., max_length=255, description="Nombre del material.")
     descripcion: Optional[str] = Field(default=None, description="Descripción detallada.")
     unidad_medida: str = Field(..., max_length=50, description="Unidad de medida (ej: unidad, caja, kg).")
+    precio_venta_base_unidad: Decimal = Field(
+        max_digits=14,
+        decimal_places=4,
+        description="Precio base por unidad de medida."
+    )
     stock_minimo: Optional[condecimal(max_digits=10, decimal_places=3)] = Field( # type: ignore
         default=None,
         description="Nivel mínimo de stock para alertas."
@@ -121,6 +144,7 @@ class MaterialSimpleRead(MaterialSimpleBase):
     id: int
     stock_actual: condecimal(max_digits=10, decimal_places=3) = Field(default=Decimal("0.0")) # type: ignore
     fecha_creacion: Optional[datetime]
+
     fecha_ultima_actualizacion: Optional[datetime]
 
     model_config = {"from_attributes": True}

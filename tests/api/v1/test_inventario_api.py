@@ -47,7 +47,9 @@ def create_valid_mat_dim_payload(suffix: str) -> dict:
         sku=f"SKU-DIM-{suffix}",
         nombre=f"Plancha Test {suffix}",
         espesor_nominal=Decimal("18.0"),
-        unidad_dimension="mm"
+        unidad_dimension="mm",
+        precio_venta_base_unidad=Decimal("100.0"),
+        unidad_precio_venta="m2"
     )
     return schema_instance.model_dump(mode='json')
 
@@ -55,7 +57,8 @@ def create_valid_mat_cons_payload(suffix: str) -> dict:
     schema_instance = MaterialConsumibleCreate(
         sku=f"SKU-CONS-{suffix}",
         nombre=f"Consumible Test {suffix}",
-        unidad_medida="litro"
+        unidad_medida="litro",
+        precio_venta_base_unidad=Decimal("50.0")
     )
     return schema_instance.model_dump(mode='json')
 
@@ -63,7 +66,8 @@ def create_valid_mat_simp_payload(suffix: str) -> dict:
     schema_instance = MaterialSimpleCreate(
         sku=f"SKU-SIMP-{suffix}",
         nombre=f"Simple Test {suffix}",
-        unidad_medida="unidad"
+        unidad_medida="unidad",
+        precio_venta_base_unidad=Decimal("10.0")
     )
     return schema_instance.model_dump(mode='json')
 
@@ -81,6 +85,7 @@ class TestMaterialDimensionalAPI:
         assert data["sku"] == payload["sku"]
         assert data["nombre"] == payload["nombre"]
         assert Decimal(data["espesor_nominal"]) == Decimal(payload["espesor_nominal"])
+        assert Decimal(data["precio_venta_base_unidad"]) == Decimal(payload["precio_venta_base_unidad"])
         new_id = data["id"]
 
         try:
@@ -89,6 +94,7 @@ class TestMaterialDimensionalAPI:
                 assert db_obj is not None, f"MaterialDimensional ID {new_id} no encontrado en BD post-creación."
                 assert db_obj.sku == payload["sku"]
                 assert db_obj.espesor_nominal == Decimal(payload["espesor_nominal"])
+                assert db_obj.precio_venta_base_unidad == Decimal(payload["precio_venta_base_unidad"])
                 logger.info(f"Test 'test_create_material_dimensional_success_admin': MaterialDimensional ID {new_id} verificado.")
         except Exception as e:
             pytest.fail(f"Error durante verificación BD en test_create_material_dimensional_success_admin: {e}")
@@ -98,7 +104,9 @@ class TestMaterialDimensionalAPI:
              sku=material_dimensional_de_prueba.sku,
              nombre=f"Duplicado Dim Test",
              espesor_nominal=Decimal("10.0"),
-             unidad_dimension="cm"
+             unidad_dimension="cm",
+            precio_venta_base_unidad=Decimal("100.0"),
+            unidad_precio_venta="m2"
         )
         payload_dict = payload_schema.model_dump(mode='json')
         response = admin_client.post(MAT_DIM_ENDPOINT, json=payload_dict)
@@ -146,7 +154,9 @@ class TestMaterialDimensionalAPI:
         update_schema = MaterialDimensionalUpdate(
             nombre=f"Plancha ACTUALIZADA {update_suffix}",
             descripcion="Nueva descripción fixture",
-            espesor_nominal=Decimal("16.5")
+            espesor_nominal=Decimal("16.5"),
+            precio_venta_base_unidad=Decimal("120.0"),
+            unidad_precio_venta="m3"
         )
         update_payload = update_schema.model_dump(mode='json', exclude_unset=True)
         response_update = admin_client.put(f"{MAT_DIM_ENDPOINT}/{material_dimensional_de_prueba.id}", json=update_payload)
@@ -157,6 +167,8 @@ class TestMaterialDimensionalAPI:
         assert data["descripcion"] == update_schema.descripcion
         assert Decimal(data["espesor_nominal"]) == update_schema.espesor_nominal
         assert data["sku"] == material_dimensional_de_prueba.sku
+        assert Decimal(data["precio_venta_base_unidad"]) == update_schema.precio_venta_base_unidad
+        assert data["unidad_precio_venta"] == update_schema.unidad_precio_venta
 
         with TestingSessionLocal() as verification_db:
              db_obj_updated = verification_db.get(MaterialDimensional, material_dimensional_de_prueba.id)
@@ -164,6 +176,8 @@ class TestMaterialDimensionalAPI:
              assert db_obj_updated.nombre == update_schema.nombre
              assert db_obj_updated.descripcion == update_schema.descripcion
              assert db_obj_updated.espesor_nominal == update_schema.espesor_nominal
+             assert db_obj_updated.precio_venta_base_unidad == update_schema.precio_venta_base_unidad
+             assert db_obj_updated.unidad_precio_venta == update_schema.unidad_precio_venta
 
     def test_update_material_dimensional_not_found(self, admin_client: TestClient):
         update_payload = MaterialDimensionalUpdate(nombre="Test").model_dump(mode='json', exclude_unset=True)
@@ -232,7 +246,8 @@ class TestMaterialConsumibleAPI:
         payload_schema = MaterialConsumibleCreate(
             sku=material_consumible_de_prueba.sku,
             nombre="Duplicado Cons",
-            unidad_medida="kg"
+            unidad_medida="kg",
+            precio_venta_base_unidad=Decimal("15.0")
         )
         payload_dict = payload_schema.model_dump(mode='json')
         response = admin_client.post(MAT_CONS_ENDPOINT, json=payload_dict)
@@ -279,7 +294,8 @@ class TestMaterialConsumibleAPI:
         update_schema = MaterialConsumibleUpdate(
             nombre=f"Consumible ACTUALIZADO {update_suffix}",
             descripcion="Nueva desc",
-            stock_minimo=Decimal("25.5")
+            stock_minimo=Decimal("25.5"),
+            precio_venta_base_unidad=Decimal("23.0")
         )
         update_payload = update_schema.model_dump(mode='json', exclude_unset=True)
         response_update = admin_client.put(f"{MAT_CONS_ENDPOINT}/{material_consumible_de_prueba.id}", json=update_payload)
@@ -289,12 +305,14 @@ class TestMaterialConsumibleAPI:
         assert data["nombre"] == update_schema.nombre
         assert data["descripcion"] == update_schema.descripcion
         assert Decimal(data["stock_minimo"]) == update_schema.stock_minimo
+        assert Decimal(data["precio_venta_base_unidad"]) == update_schema.precio_venta_base_unidad
 
         with TestingSessionLocal() as verification_db:
              db_obj_updated = verification_db.get(MaterialConsumible, material_consumible_de_prueba.id)
              assert db_obj_updated is not None
              assert db_obj_updated.nombre == update_schema.nombre
              assert db_obj_updated.stock_minimo == update_schema.stock_minimo
+             assert db_obj_updated.precio_venta_base_unidad == update_schema.precio_venta_base_unidad
 
     def test_update_material_consumible_not_found(self, admin_client: TestClient):
         update_payload = MaterialConsumibleUpdate(nombre="Test").model_dump(mode='json', exclude_unset=True)
@@ -406,7 +424,8 @@ class TestMaterialSimpleAPI:
         payload_schema = MaterialSimpleCreate(
             sku=material_simple_de_prueba.sku, # Existente
             nombre="Duplicado Simp",
-            unidad_medida="par"
+            unidad_medida="par",
+            precio_venta_base_unidad=Decimal("8.0")
         )
         payload_dict = payload_schema.model_dump(mode='json')
         response = admin_client.post(MAT_SIMP_ENDPOINT, json=payload_dict)

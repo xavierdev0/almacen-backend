@@ -543,7 +543,9 @@ def material_dimensional_de_prueba(admin_client: TestClient, db_session: Session
         sku=f"FIX-DIM-{unique_suffix}",
         nombre=f"Plancha Fixture {unique_suffix}",
         espesor_nominal=Decimal("15.0"),
-        unidad_dimension="mm"
+        unidad_dimension="mm",
+        precio_venta_base_unidad=Decimal("80.0"),
+        unidad_precio_venta="m2"
     )
     payload_dict = payload_schema.model_dump(mode='json') # Correcto
 
@@ -570,7 +572,8 @@ def material_consumible_de_prueba(admin_client: TestClient, db_session: Session)
         sku=f"FIX-CONS-{unique_suffix}",
         nombre=f"Lija Fixture {unique_suffix}",
         unidad_medida="pliego",
-        stock_minimo=Decimal("10.0")
+        stock_minimo=Decimal("10.0"),
+        precio_venta_base_unidad=Decimal("0.5")
     )
     payload_dict = payload_schema.model_dump(mode='json') # Correcto
 
@@ -596,7 +599,8 @@ def material_simple_de_prueba(admin_client: TestClient, db_session: Session) -> 
         sku=f"FIX-SIMP-{unique_suffix}",
         nombre=f"Tornillo Fixture {unique_suffix}",
         unidad_medida="ciento",
-        stock_minimo=Decimal("2.0")
+        stock_minimo=Decimal("2.0"),
+        precio_venta_base_unidad=Decimal("0.5")
     )
     payload_dict = payload_schema.model_dump(mode='json') 
 

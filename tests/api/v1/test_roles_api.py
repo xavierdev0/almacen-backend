@@ -279,7 +279,6 @@ def test_assign_permission_to_role_success_admin(
     permiso_asignado_encontrado = any(p["id"] == permiso_leer_cliente_id for p in data.get("permisos", []))
     assert permiso_asignado_encontrado, f"El permiso ID {permiso_leer_cliente_id} no se encontró en la respuesta."
 
-    # --- VERIFICACIÓN REFACTORIZADA ---
     try:
         with TestingSessionLocal() as verification_db:
              logger.debug(f"Test 'test_assign_permission_to_role_success_admin': Verificando rol ID {new_role_id} con nueva sesión.")
@@ -291,7 +290,7 @@ def test_assign_permission_to_role_success_admin(
              logger.info(f"Test 'test_assign_permission_to_role_success_admin': Permiso asignado a rol ID {new_role_id} verificado.")
     except Exception as e:
         pytest.fail(f"Error durante verificación BD en test_assign_permission_to_role_success_admin: {e}")
-    # --- FIN VERIFICACIÓN ---
+
 
 # ... (tests asignar permiso ya asignado, rol no encontrado, permiso no encontrado, forbidden sin cambios) ...
 def test_assign_permission_already_assigned_admin(

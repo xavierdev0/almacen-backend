@@ -10,10 +10,12 @@ from decimal import Decimal
 
 
 # Importar el modelo principal
-from app.models.order_models import PedidoCliente, Proforma, LineaProformaMaterial, LineaProformaServicio # Asegurar estos modelos
-# Importar otros modelos necesarios para relaciones (si se usa selectinload)
+from app.models.order_models import (
+    PedidoCliente, Proforma, LineaProformaMaterial,
+    LineaProformaServicio, OrdenProduccion, AsignacionTareaOrden # Añadir OrdenProduccion y AsignacionTareaOrden
+)
 from app.models.client_model import Cliente
-from app.models.user_models import Usuario
+from app.models.user_models import Usuario, Rol
 
 logger = logging.getLogger(__name__)
 
@@ -501,7 +503,7 @@ def update_proforma_totals(db: Session, *, proforma_id: int) -> Optional[Proform
         if db_proforma.lineas_servicio:
             new_subtotal += sum(linea.total_linea for linea in db_proforma.lineas_servicio if linea.total_linea is not None)
 
-        # 3. Calcular impuestos (Ejemplo: IVA 12% sobre subtotal - ¡AJUSTAR SEGÚN REGLAS ECUADOR!)
+        # 3. Calcular impuestos (Ejemplo: IVA 12% sobre subtotal)
         # TODO: Implementar lógica de impuestos real. ¿Depende del tipo de producto/servicio? ¿Cliente?
         # Por ahora, un ejemplo simple o 0.
         tasa_iva = Decimal("0.12") # Ejemplo 12%
@@ -539,3 +541,323 @@ def update_proforma_totals(db: Session, *, proforma_id: int) -> Optional[Proform
         raise e
 
 # (Aquí añadiríamos funciones para eliminar/actualizar líneas si fueran necesarias)
+
+
+
+# =======================================
+# Funciones CRUD para PedidoCliente (Existentes)
+# =======================================
+# ... (tus funciones existentes para PedidoCliente, Proforma, Líneas...) ...
+
+
+# =====================================================
+# === Funciones CRUD para OrdenProduccion (NUEVAS) ===
+# =====================================================
+
+def create_orden_produccion(db: Session, *, orden_data: OrdenProduccion) -> OrdenProduccion:
+    """
+    Crea un nuevo registro de OrdenProduccion en la base de datos.
+
+    Args:
+        db: La sesión de base de datos activa.
+        orden_data: Una instancia del modelo OrdenProduccion con los datos a crear.
+
+    Returns:
+        El objeto OrdenProduccion recién creado y refrescado.
+
+    Raises:
+        IntegrityError: Si ocurre una violación de constraint (ej: FK pedido_cliente_id duplicada/inválida).
+        SQLAlchemyError: Para otros errores relacionados con la base de datos.
+        Exception: Para errores inesperados.
+    """
+    db_orden = orden_data
+    logger.debug(f"Repositorio: Intentando crear OrdenProduccion para Pedido ID: {db_orden.pedido_cliente_id}")
+    try:
+        db.add(db_orden)
+        db.commit()
+        db.refresh(db_orden)
+        logger.info(f"OrdenProduccion creada con éxito: ID={db_orden.id} para Pedido ID={db_orden.pedido_cliente_id}")
+        return db_orden
+    except IntegrityError as e:
+        db.rollback()
+        logger.error(f"Error de integridad al crear OrdenProduccion para Pedido ID {db_orden.pedido_cliente_id}: {e}", exc_info=True)
+        raise e # Relanzar para que el servicio maneje (probablemente 409)
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Error de DB (SQLAlchemy) al crear OrdenProduccion: {e}", exc_info=True)
+        raise e
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error inesperado al crear OrdenProduccion: {e}", exc_info=True)
+        raise e
+
+def get_orden_by_id(db: Session, *, orden_id: int, load_related: bool = True) -> Optional[OrdenProduccion]:
+    """
+    Obtiene una OrdenProduccion específica por su ID.
+
+    Permite opcionalmente cargar relaciones comunes (pedido, supervisor, tareas)
+    de forma eager.
+
+    Args:
+        db: La sesión de base de datos activa.
+        orden_id: El ID de la orden a buscar.
+        load_related: Si es True, carga eager las relaciones.
+
+    Returns:
+        El objeto OrdenProduccion si se encuentra, None en caso contrario.
+
+    Raises:
+        SQLAlchemyError: Para errores relacionados con la base de datos.
+        Exception: Para errores inesperados.
+    """
+    logger.debug(f"Repositorio: Buscando OrdenProduccion por ID: {orden_id}, Cargar relacionados: {load_related}")
+    try:
+        query = select(OrdenProduccion).where(OrdenProduccion.id == orden_id)
+        if load_related:
+            query = query.options(
+                selectinload(OrdenProduccion.pedido).selectinload(PedidoCliente.cliente), # Cargar Pedido y Cliente
+                selectinload(OrdenProduccion.supervisor), # Cargar Supervisor (Usuario)
+                selectinload(OrdenProduccion.asignaciones_tareas).selectinload(AsignacionTareaOrden.usuario_asignado), # Cargar Tareas y Usuario Asignado
+                selectinload(OrdenProduccion.asignaciones_tareas).selectinload(AsignacionTareaOrden.rol_contexto) # Cargar Tareas y Rol Contexto
+                # Considerar si cargar linea_servicio/linea_material dentro de tareas es necesario aquí
+            )
+        orden = db.exec(query).first()
+        logger.debug(f"OrdenProduccion ID {orden_id} {'encontrada' if orden else 'no encontrada'}.")
+        return orden
+    except SQLAlchemyError as e:
+        logger.error(f"Error DB (SQLAlchemy) al buscar OrdenProduccion ID {orden_id}: {e}", exc_info=True); raise e
+    except Exception as e:
+        logger.error(f"Error inesperado al buscar OrdenProduccion ID {orden_id}: {e}", exc_info=True); raise e
+
+def list_ordenes_by_estado(
+    db: Session, *,
+    estados: List[str],
+    skip: int = 0,
+    limit: int = 100,
+    load_related: bool = False # Por defecto False para listas puede ser más eficiente
+) -> Sequence[OrdenProduccion]:
+    """
+    Obtiene una lista paginada de OrdenProduccion filtrada por uno o más estados.
+    Ordena por prioridad descendente y luego por fecha de inicio de espera ascendente.
+
+    Args:
+        db: La sesión de base de datos activa.
+        estados: Lista de strings con los estados a buscar (ej: ['PENDIENTE_ASIGNACION']).
+        skip: Número de registros a saltar.
+        limit: Número máximo de registros a devolver.
+        load_related: Si es True, carga relaciones básicas (ej: pedido, supervisor).
+
+    Returns:
+        Una secuencia (lista) de objetos OrdenProduccion que coinciden.
+
+    Raises:
+        SQLAlchemyError: Para errores relacionados con la base de datos.
+        Exception: Para errores inesperados.
+    """
+    logger.debug(f"Repositorio: Listando OrdenProduccion por Estados: {estados}, skip:{skip}, limit:{limit}, related:{load_related}")
+    if not estados: # Si la lista de estados está vacía, no devolver nada
+        return []
+    try:
+        query = select(OrdenProduccion).where(OrdenProduccion.estado.in_(estados))
+
+        if load_related:
+             query = query.options(
+                 selectinload(OrdenProduccion.pedido).selectinload(PedidoCliente.cliente), # Cargar Pedido y Cliente
+                 selectinload(OrdenProduccion.supervisor) # Cargar Supervisor
+                 # Evitar cargar tareas por defecto en listas grandes
+             )
+
+        # Ordenar según índice idx_orden_prod_estado_prioridad (estado ya filtra, usar prioridad y fecha)
+        query = query.order_by(OrdenProduccion.prioridad.desc(), OrdenProduccion.fecha_inicio_espera.asc())
+        query = query.offset(skip).limit(limit)
+
+        ordenes = db.exec(query).all()
+        logger.debug(f"Se encontraron {len(ordenes)} OrdenProduccion para estados {estados}.")
+        return ordenes
+    except SQLAlchemyError as e:
+        logger.error(f"Error DB (SQLAlchemy) al listar OrdenProduccion por estados {estados}: {e}", exc_info=True); raise e
+    except Exception as e:
+        logger.error(f"Error inesperado al listar OrdenProduccion por estados {estados}: {e}", exc_info=True); raise e
+
+def update_orden_produccion(db: Session, *, db_orden: OrdenProduccion, update_data: Dict[str, Any]) -> OrdenProduccion:
+    """
+    Actualiza un registro de OrdenProduccion existente.
+
+    Args:
+        db: La sesión de base de datos activa.
+        db_orden: El objeto OrdenProduccion existente obtenido de la BD.
+        update_data: Un diccionario con los campos a actualizar.
+
+    Returns:
+        El objeto OrdenProduccion actualizado y refrescado.
+
+    Raises:
+        SQLAlchemyError: Para errores relacionados con la base de datos.
+        Exception: Para errores inesperados.
+    """
+    orden_id = db_orden.id
+    logger.debug(f"Repositorio: Intentando actualizar OrdenProduccion ID: {orden_id} con datos: {list(update_data.keys())}")
+    try:
+        if not update_data:
+            logger.warning(f"No se proporcionaron datos para actualizar OrdenProduccion ID {orden_id}.")
+            return db_orden
+
+        db_orden.sqlmodel_update(update_data)
+        db.add(db_orden)
+        db.commit()
+        db.refresh(db_orden)
+        logger.info(f"OrdenProduccion ID {orden_id} actualizada con éxito.")
+        return db_orden
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Error DB (SQLAlchemy) al actualizar OrdenProduccion ID {orden_id}: {e}", exc_info=True); raise e
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error inesperado al actualizar OrdenProduccion ID {orden_id}: {e}", exc_info=True); raise e
+
+
+# =========================================================
+# === Funciones CRUD para AsignacionTareaOrden (NUEVAS) ===
+# =========================================================
+
+def create_asignacion_tarea(db: Session, *, tarea_data: AsignacionTareaOrden) -> AsignacionTareaOrden:
+    """
+    Crea un nuevo registro de AsignacionTareaOrden en la base de datos.
+
+    Args:
+        db: La sesión de base de datos activa.
+        tarea_data: Una instancia del modelo AsignacionTareaOrden con los datos a crear.
+
+    Returns:
+        El objeto AsignacionTareaOrden recién creado y refrescado.
+
+    Raises:
+        IntegrityError: Si ocurre una violación de constraint (ej: FKs inválidas).
+        SQLAlchemyError: Para otros errores relacionados con la base de datos.
+        Exception: Para errores inesperados.
+    """
+    db_tarea = tarea_data
+    logger.debug(f"Repositorio: Intentando crear AsignacionTareaOrden para Orden ID: {db_tarea.orden_id}, Tipo: {db_tarea.tipo_tarea}")
+    try:
+        db.add(db_tarea)
+        db.commit()
+        db.refresh(db_tarea)
+        logger.info(f"AsignacionTareaOrden creada con éxito: ID={db_tarea.id} para Orden ID={db_tarea.orden_id}")
+        return db_tarea
+    except IntegrityError as e:
+        db.rollback()
+        logger.error(f"Error de integridad al crear AsignacionTareaOrden: {e}", exc_info=True)
+        raise e
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Error de DB (SQLAlchemy) al crear AsignacionTareaOrden: {e}", exc_info=True)
+        raise e
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error inesperado al crear AsignacionTareaOrden: {e}", exc_info=True)
+        raise e
+
+def get_tarea_by_id(db: Session, *, tarea_id: int, load_related: bool = False) -> Optional[AsignacionTareaOrden]:
+    """
+    Obtiene una AsignacionTareaOrden específica por su ID.
+
+    Args:
+        db: La sesión de base de datos activa.
+        tarea_id: El ID de la tarea a buscar.
+        load_related: Si es True, carga relaciones (orden, usuario, rol).
+
+    Returns:
+        El objeto AsignacionTareaOrden si se encuentra, None en caso contrario.
+
+    Raises:
+        SQLAlchemyError: Para errores relacionados con la base de datos.
+        Exception: Para errores inesperados.
+    """
+    logger.debug(f"Repositorio: Buscando AsignacionTareaOrden por ID: {tarea_id}, Cargar relacionados: {load_related}")
+    try:
+        query = select(AsignacionTareaOrden).where(AsignacionTareaOrden.id == tarea_id)
+        if load_related:
+             query = query.options(
+                 selectinload(AsignacionTareaOrden.orden),
+                 selectinload(AsignacionTareaOrden.usuario_asignado),
+                 selectinload(AsignacionTareaOrden.rol_contexto)
+                 # Cargar linea_servicio / linea_material opcionalmente
+             )
+        tarea = db.exec(query).first()
+        logger.debug(f"AsignacionTareaOrden ID {tarea_id} {'encontrada' if tarea else 'no encontrada'}.")
+        return tarea
+    except SQLAlchemyError as e:
+        logger.error(f"Error DB (SQLAlchemy) al buscar Tarea ID {tarea_id}: {e}", exc_info=True); raise e
+    except Exception as e:
+        logger.error(f"Error inesperado al buscar Tarea ID {tarea_id}: {e}", exc_info=True); raise e
+
+def list_tareas_by_orden(db: Session, *, orden_id: int, load_related: bool = True) -> Sequence[AsignacionTareaOrden]:
+    """
+    Obtiene todas las tareas asociadas a una Orden de Producción específica.
+
+    Args:
+        db: La sesión de base de datos activa.
+        orden_id: El ID de la orden cuyas tareas se listarán.
+        load_related: Si es True, carga relaciones de cada tarea (usuario, rol).
+
+    Returns:
+        Una secuencia (lista) de objetos AsignacionTareaOrden asociados a la orden.
+
+    Raises:
+        SQLAlchemyError: Para errores relacionados con la base de datos.
+        Exception: Para errores inesperados.
+    """
+    logger.debug(f"Repositorio: Listando Tareas para Orden ID: {orden_id}, Cargar relacionados: {load_related}")
+    try:
+        query = select(AsignacionTareaOrden).where(AsignacionTareaOrden.orden_id == orden_id)
+        if load_related:
+            query = query.options(
+                 selectinload(AsignacionTareaOrden.usuario_asignado),
+                 selectinload(AsignacionTareaOrden.rol_contexto)
+            )
+        # Ordenar quizás por ID o tipo de tarea
+        query = query.order_by(AsignacionTareaOrden.id)
+        tareas = db.exec(query).all()
+        logger.debug(f"Se encontraron {len(tareas)} Tareas para Orden ID {orden_id}.")
+        return tareas
+    except SQLAlchemyError as e:
+        logger.error(f"Error DB (SQLAlchemy) al listar Tareas para Orden ID {orden_id}: {e}", exc_info=True); raise e
+    except Exception as e:
+        logger.error(f"Error inesperado al listar Tareas para Orden ID {orden_id}: {e}", exc_info=True); raise e
+
+
+def update_asignacion_tarea(db: Session, *, db_tarea: AsignacionTareaOrden, update_data: Dict[str, Any]) -> AsignacionTareaOrden:
+    """
+    Actualiza un registro de AsignacionTareaOrden existente.
+
+    Args:
+        db: La sesión de base de datos activa.
+        db_tarea: El objeto AsignacionTareaOrden existente obtenido de la BD.
+        update_data: Un diccionario con los campos a actualizar.
+
+    Returns:
+        El objeto AsignacionTareaOrden actualizado y refrescado.
+
+    Raises:
+        SQLAlchemyError: Para errores relacionados con la base de datos.
+        Exception: Para errores inesperados.
+    """
+    tarea_id = db_tarea.id
+    logger.debug(f"Repositorio: Intentando actualizar Tarea ID: {tarea_id} con datos: {list(update_data.keys())}")
+    try:
+        if not update_data:
+            logger.warning(f"No se proporcionaron datos para actualizar Tarea ID {tarea_id}.")
+            return db_tarea
+
+        db_tarea.sqlmodel_update(update_data)
+        db.add(db_tarea)
+        db.commit()
+        db.refresh(db_tarea)
+        logger.info(f"AsignacionTareaOrden ID {tarea_id} actualizada con éxito.")
+        return db_tarea
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Error DB (SQLAlchemy) al actualizar Tarea ID {tarea_id}: {e}", exc_info=True); raise e
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error inesperado al actualizar Tarea ID {tarea_id}: {e}", exc_info=True); raise e

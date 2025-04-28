@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     )
     from .service_models import ServicioDefinicion
     from .billing_models import VentaFactura
+    #from .order_production_schema import AsignacionTareaOrden
 
 # -----------------------------------------------------
 # Modelo para Pedido del Cliente (Contenedor Principal)
@@ -269,93 +270,6 @@ class AsignacionTareaOrden(SQLModel, table=True):
 
 
 
-
-
-
-
-
-
-
-
-# -----------------------------------------------------
-# Modelo para Líneas de Proforma (Materiales)
-# -----------------------------------------------------
-
-class LineaProformaMaterial(SQLModel, table=True):
-    """Representa una línea de item de material en una proforma."""
-    __tablename__ = "linea_proforma_material"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    proforma_id: int = Field(foreign_key="proforma.id", index=True)
-    # Indica de qué tabla de inventario proviene (o si es un item específico)
-    tipo_material_origen: str = Field(max_length=50) # ENUM DB: 'STOCK_DIMENSIONAL', 'CONSUMIBLE', 'SIMPLE'
-    # Solo uno de los siguientes FKs debería tener valor (validación en servicio)
-    stock_item_dimensional_id: Optional[int] = Field(
-        default=None, foreign_key="stock_item_dimensional.id", index=True, nullable=True
-    )
-    material_consumible_id: Optional[int] = Field(
-        default=None, foreign_key="material_consumible.id", index=True, nullable=True
-    )
-    material_simple_id: Optional[int] = Field(
-        default=None, foreign_key="material_simple.id", index=True, nullable=True
-    )
-    descripcion_item: str = Field(max_length=255) # Denormalizado/Copiado para la proforma
-    cantidad: Decimal = Field(max_digits=10, decimal_places=3)
-    unidad: str = Field(max_length=50) # Unidad de venta/proforma
-    precio_unitario: Decimal = Field(max_digits=12, decimal_places=2) # Precio en el momento de la proforma
-    total_linea: Decimal = Field(max_digits=15, decimal_places=2) # Calculado: cantidad * precio_unitario
-    detalles_corte_solicitado: Optional[str] = Field(default=None, nullable=True) # Podría ser JSON
-
-    # --- Relaciones ---
-    # Relación N:1 con Proforma
-    proforma: "Proforma" = Relationship(back_populates="lineas_material")
-
-    # Relaciones N:1 con los posibles orígenes del material
-    stock_item: Optional["StockItemDimensional"] = Relationship(back_populates="lineas_proforma")
-    material_consumible: Optional["MaterialConsumible"] = Relationship(back_populates="lineas_proforma")
-    material_simple: Optional["MaterialSimple"] = Relationship(back_populates="lineas_proforma")
-
-    # Relación 1:N con LineaProformaServicio (si un servicio se aplica DIRECTAMENTE a esta línea de material)
-    servicios_asociados: List["LineaProformaServicio"] = Relationship(back_populates="linea_material_asociada")
-
-    # Relación 1:N con AsignacionTareaOrden (tareas específicas para esta línea de material, ej: CORTE_MATERIAL)
-    tareas_asignadas: List["AsignacionTareaOrden"] = Relationship(back_populates="linea_material")
-
-
-# -----------------------------------------------------
-# Modelo para Líneas de Proforma (Servicios)
-# -----------------------------------------------------
-
-class LineaProformaServicio(SQLModel, table=True):
-    """Representa una línea de item de servicio en una proforma."""
-    __tablename__ = "linea_proforma_servicio"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    proforma_id: int = Field(foreign_key="proforma.id", index=True) # FK a la proforma de SERVICIO
-    servicio_definicion_id: int = Field(foreign_key="servicio_definicion.id", index=True)
-    # Opcional: Si el servicio se aplica sobre un material específico de la otra proforma
-    linea_proforma_material_id: Optional[int] = Field(
-        default=None, foreign_key="linea_proforma_material.id", index=True, nullable=True
-    )
-    descripcion_servicio: str = Field(max_length=255) # Denormalizado/Copiado para la proforma
-    cantidad: Decimal = Field(max_digits=10, decimal_places=3) # Según unidad_cobro del servicio
-    precio_unitario: Decimal = Field(max_digits=12, decimal_places=2) # Precio calculado o fijo en el momento
-    total_linea: Decimal = Field(max_digits=15, decimal_places=2) # Calculado
-    ruta_imagen_cnc: Optional[str] = Field(default=None, max_length=512, nullable=True) # Ruta al archivo
-    detalles_adicionales: Optional[str] = Field(default=None, nullable=True) # Considerar sa_column=Column(Text)
-
-    # --- Relaciones ---
-    # Relación N:1 con Proforma
-    proforma: "Proforma" = Relationship(back_populates="lineas_servicio")
-
-    # Relación N:1 con ServicioDefinicion
-    servicio_definicion: "ServicioDefinicion" = Relationship(back_populates="lineas_proforma")
-
-    # Relación N:1 con LineaProformaMaterial (servicio aplicado a un material)
-    linea_material_asociada: Optional["LineaProformaMaterial"] = Relationship(back_populates="servicios_asociados")
-
-    # Relación 1:N con AsignacionTareaOrden (tareas específicas para esta línea de servicio, ej: DIBUJO_CNC)
-    tareas_asignadas: List["AsignacionTareaOrden"] = Relationship(back_populates="linea_servicio")
 
 
 # ... (Modelos OrdenProduccion, AsignacionTareaOrden) ...

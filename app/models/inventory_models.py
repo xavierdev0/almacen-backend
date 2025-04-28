@@ -26,6 +26,8 @@ class MaterialDimensional(SQLModel, table=True):
     descripcion: Optional[str] = Field(default=None) # Considerar: sa_column=Column(Text)
     espesor_nominal: Decimal = Field(max_digits=10, decimal_places=3)
     unidad_dimension: str = Field(default="mm", max_length=10)
+    precio_venta_base_unidad: Decimal = Field(max_digits=14, decimal_places=4) # Esto se agrego
+    unidad_precio_venta: str = Field(default="m2", max_length=20) # Esto se agrego
     fecha_creacion: Optional[datetime] = Field(default_factory=datetime.utcnow, nullable=True)
     fecha_ultima_actualizacion: Optional[datetime] = Field(
         default_factory=datetime.utcnow, sa_column_kwargs={"onupdate": datetime.utcnow}, nullable=True
@@ -98,6 +100,7 @@ class MaterialConsumible(SQLModel, table=True):
     descripcion: Optional[str] = Field(default=None)
     unidad_medida: str = Field(max_length=50)
     rendimiento_m2: Optional[Decimal] = Field(default=None, max_digits=10, decimal_places=3, nullable=True)
+    precio_venta_base_unidad: Decimal = Field(max_digits=14, decimal_places=4) # Esto se agrego
     stock_actual: Decimal = Field(default=0, max_digits=10, decimal_places=3)
     stock_minimo: Optional[Decimal] = Field(default=None, max_digits=10, decimal_places=3, nullable=True)
     ubicacion: Optional[str] = Field(default=None, max_length=255)
@@ -125,6 +128,7 @@ class MaterialSimple(SQLModel, table=True):
     nombre: str = Field(max_length=255)
     descripcion: Optional[str] = Field(default=None)
     unidad_medida: str = Field(max_length=50)
+    precio_venta_base_unidad: Decimal = Field(max_digits=14, decimal_places=4) # Esto se agrego
     stock_actual: Decimal = Field(default=0, max_digits=10, decimal_places=3)
     stock_minimo: Optional[Decimal] = Field(default=None, max_digits=10, decimal_places=3, nullable=True)
     ubicacion: Optional[str] = Field(default=None, max_length=255)
